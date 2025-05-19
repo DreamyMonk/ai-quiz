@@ -15,7 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { FullScreenWarningModal } from './FullScreenWarningModal';
-import { AlertTriangle, Loader2, BookOpenCheck, Camera, Mic, ScreenShare, XCircle, Maximize, ShieldAlert, UserRoundX } from 'lucide-react';
+import { AlertTriangle, Loader2, BookOpenCheck, Camera, Mic, ScreenShare, XCircle, Maximize, ShieldAlert, UserRoundX, Info } from 'lucide-react';
 
 
 const DEFAULT_QUIZ_DURATION_MINUTES = 15;
@@ -138,20 +138,18 @@ export function QuizClient() {
       cameraStreamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        // Use 'oncanplay' to ensure video is ready to be played
         videoRef.current.oncanplay = () => {
             if (videoRef.current) {
                 videoRef.current.play().catch(err => {
                     console.error('Error playing video via oncanplay:', err);
-                    toast({
-                        variant: 'destructive',
-                        title: 'Camera Preview Error',
-                        description: 'Could not start camera preview. Please check camera.',
-                    });
+                    // toast({ // This toast can be noisy if there are transient play issues
+                    //     variant: 'destructive',
+                    //     title: 'Camera Preview Error',
+                    //     description: 'Could not start camera preview. Please check camera.',
+                    // });
                 });
             }
         };
-        // Explicitly call load() to trigger metadata loading and oncanplay event
         videoRef.current.load(); 
       }
       setHasCameraPermission(true);
@@ -390,12 +388,29 @@ export function QuizClient() {
       }
 
       if (aiAnalysisResult) {
+        const { isHumanDetected, isBookDetected, isPhoneDetected, isLookingAway, anomalyReason } = aiAnalysisResult;
+        // Informational toast for every AI analysis
+        let infoDescription = `Human: ${isHumanDetected ? 'Yes' : 'No'}`;
+        if (isHumanDetected) { // Only add these if a human is detected, to avoid noise
+          infoDescription += `, Book: ${isBookDetected ? 'Yes' : 'No'}`;
+          infoDescription += `, Phone: ${isPhoneDetected ? 'Yes' : 'No'}`;
+          infoDescription += `, Looking Away: ${isLookingAway ? 'Yes' : 'No'}`;
+        }
+        if (anomalyReason) {
+          infoDescription += `. Reason: ${anomalyReason}`;
+        }
+        toast({
+          title: 'AI Camera Analysis',
+          description: infoDescription,
+          duration: 3000, // Shorter duration for informational toasts
+        });
+
         if (gracePeriodChecksCompleted >= PROCTORING_GRACE_PERIOD_CHECKS) {
-            if (!aiAnalysisResult.isHumanDetected || !currentMicActive) {
+            if (!isHumanDetected || !currentMicActive) {
                 setHumanPresenceIssue(true);
-                let reason = aiAnalysisResult.anomalyReason || "Human presence or microphone issue detected.";
-                if(!aiAnalysisResult.isHumanDetected && !currentMicActive) reason = "Human presence not detected and microphone inactive.";
-                else if (!aiAnalysisResult.isHumanDetected) reason = aiAnalysisResult.anomalyReason || "Human presence not detected.";
+                let reason = anomalyReason || "Human presence or microphone issue detected.";
+                if(!isHumanDetected && !currentMicActive) reason = "Human presence not detected and microphone inactive.";
+                else if (!isHumanDetected) reason = anomalyReason || "Human presence not detected.";
                 else if (!currentMicActive) reason = "Microphone appears inactive.";
                 setHumanPresenceIssueReason(reason);
                 setIsExamPausedByProctoring(true);
@@ -408,10 +423,10 @@ export function QuizClient() {
             }
         }
 
-        if (aiAnalysisResult.isHumanDetected && (aiAnalysisResult.isBookDetected || aiAnalysisResult.isPhoneDetected || aiAnalysisResult.isLookingAway)) {
+        if (isHumanDetected && (isBookDetected || isPhoneDetected || isLookingAway)) {
           toast({
             title: 'Proctoring Alert',
-            description: aiAnalysisResult.anomalyReason || 'Potential policy violation detected.',
+            description: anomalyReason || 'Potential policy violation detected.',
             variant: 'destructive',
             duration: 7000,
           });
