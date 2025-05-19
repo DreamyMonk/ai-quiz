@@ -3,6 +3,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+import Script from 'next/script';
 import type { GeneratedQuizData, McqQuestion, QuestionAttempt, StudentAnswers } from '@/types/quiz';
 import { useToast } from '@/hooks/use-toast';
 import { analyzeQuizPerformance, type AnalyzeQuizPerformanceInput, type AnalyzeQuizPerformanceOutput } from '@/ai/flows/analyze-quiz-performance';
@@ -36,7 +37,7 @@ export function QuizClient() {
   // Proctoring states
   const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
   const [hasMicPermission, setHasMicPermission] = useState<boolean | null>(null);
-  const [hasScreenPermission, setHasScreenPermission] = useState<boolean | null>(null);
+  const [hasScreenPermission, setHasScreenPermission] = useState<boolean | null>(null); // True if entire screen is shared
   const [isFullScreen, setIsFullScreen] = useState(false);
   const [isExamPausedByProctoring, setIsExamPausedByProctoring] = useState(false);
   const [showFullScreenWarningModal, setShowFullScreenWarningModal] = useState(false);
@@ -96,7 +97,7 @@ export function QuizClient() {
         microphoneSourceRef.current = audioContext.createMediaStreamSource(cameraStreamRef.current);
         microphoneSourceRef.current.connect(analyserRef.current);
         console.log("Microphone analysis setup complete.");
-        setIsMicCurrentlyActive(true); // Assume active on setup, will be verified by check
+        setIsMicCurrentlyActive(true); 
       } catch (e) {
         console.error("Error setting up microphone analysis: ", e);
         toast({title: "Mic Analysis Error", description: "Could not set up microphone activity detection.", variant: "destructive"});
@@ -124,7 +125,7 @@ export function QuizClient() {
       sum += dataArrayRef.current[i];
     }
     const average = sum / dataArrayRef.current.length;
-    const active = average > 0.5; // Extremely low threshold, just checks if not totally silent
+    const active = average > 0.5; 
     setIsMicCurrentlyActive(active);
     return active;
   }, [hasMicPermission]);
@@ -141,29 +142,60 @@ export function QuizClient() {
       }
       setHasCameraPermission(true);
       setHasMicPermission(true);
-      setupMicrophoneAnalysis(); // Setup mic analysis after getting stream
+      setupMicrophoneAnalysis(); 
       return true;
     } catch (error) {
       console.error('Error accessing camera/mic:', error);
       setHasCameraPermission(false);
       setHasMicPermission(false);
-      toast({ variant: 'destructive', title: 'Camera/Mic Access Denied', description: 'Please enable camera and microphone permissions in your browser settings.' });
+      toast({ variant: 'destructive', title: 'Camera & Mic Access Denied', description: 'Please enable camera AND microphone permissions in your browser settings. Both are mandatory.' });
       return false;
     }
   };
 
   const requestScreenSharePermission = async () => {
     try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({ video: { cursor: "always" }, audio: false });
-      screenStreamRef.current = stream;
-      setHasScreenPermission(true);
-      return true;
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: { cursor: "always", displaySurface: "monitor" } as MediaTrackConstraints, // Hint for entire screen
+        audio: false,
+      });
+      
+      const videoTrack = stream.getVideoTracks()[0];
+      const settings = videoTrack.getSettings();
+
+      if (settings.displaySurface === "monitor") {
+        screenStreamRef.current = stream;
+        setHasScreenPermission(true);
+        toast({
+          title: "Screen Share Activated",
+          description: "Entire screen sharing is active.",
+        });
+        return true;
+      } else {
+        // User shared a window or tab, not the entire screen
+        videoTrack.stop(); // Stop the specific track
+        stream.getTracks().forEach(track => track.stop()); // Ensure all tracks from this stream are stopped
+        screenStreamRef.current = null;
+        setHasScreenPermission(false);
+        toast({
+          variant: "destructive",
+          title: "Incorrect Screen Share Type",
+          description: "You must share your ENTIRE SCREEN, not just a window or tab. Please click 'Request Screen Share' again and select your entire screen.",
+          duration: 8000, // Longer duration for this important message
+        });
+        return false;
+      }
     } catch (error) {
       console.error('Error accessing screen share:', error);
+      screenStreamRef.current = null;
       setHasScreenPermission(false);
-      // Screen share is optional, so warning is less severe
-      toast({ variant: 'warning', title: 'Screen Share Access Denied', description: 'Screen sharing is optional and was not enabled.' });
-      return false; // Still return false to indicate it wasn't successful
+      toast({
+        variant: "destructive",
+        title: "Screen Share Access Denied or Failed",
+        description: "Sharing your entire screen is mandatory for this exam. Please try again or check browser permissions.",
+        duration: 8000,
+      });
+      return false;
     }
   };
 
@@ -177,22 +209,23 @@ export function QuizClient() {
   }, [toast]);
 
   const startExamFlow = useCallback(() => {
-    if (hasCameraPermission && hasMicPermission) { 
+    if (hasCameraPermission && hasMicPermission && hasScreenPermission) { 
       setQuizState('instructions');
     } else {
        setQuizState('permission_setup'); 
        let missingItems = [];
        if (!hasCameraPermission) missingItems.push("Camera");
        if (!hasMicPermission) missingItems.push("Microphone");
-       toast({title: "Setup Incomplete", description: `Please grant required permissions. Missing: ${missingItems.join(', ')}.`, variant: "destructive"});
+       if (!hasScreenPermission) missingItems.push("Entire Screen Share");
+       toast({title: "Setup Incomplete", description: `Please grant all required permissions. Missing: ${missingItems.join(', ')}. Ensure 'Entire Screen' is shared.`, variant: "destructive", duration: 7000});
     }
-  }, [hasCameraPermission, hasMicPermission, toast]);
+  }, [hasCameraPermission, hasMicPermission, hasScreenPermission, toast]);
 
   const beginExam = () => {
     enterFullScreen();
     setQuizState('in_progress');
-    setGracePeriodChecksCompleted(0); // Reset grace period counter
-    setHumanPresenceIssue(false); // Reset human presence issue
+    setGracePeriodChecksCompleted(0); 
+    setHumanPresenceIssue(false); 
   };
 
 
@@ -205,14 +238,13 @@ export function QuizClient() {
       if (!isCurrentlyFullScreen && quizState === 'in_progress') {
         setShowFullScreenWarningModal(true);
         setIsExamPausedByProctoring(true);
-        setHumanPresenceIssue(false); // Clear human presence issue when fullscreen warning takes precedence
+        setHumanPresenceIssue(false); 
         if (proctoringReturnTimerRef.current) clearTimeout(proctoringReturnTimerRef.current);
         setFullScreenReturnCountdown(FULLSCREEN_RETURN_TIMEOUT_SECONDS); 
         proctoringReturnTimerRef.current = setInterval(() => {
             setFullScreenReturnCountdown(prev => {
                 if (prev <= 1) {
                     if(proctoringReturnTimerRef.current) clearInterval(proctoringReturnTimerRef.current);
-                    // toast({title: "Fullscreen Timeout", description: "Please return to fullscreen or end the exam.", variant: "destructive"});
                     return 0;
                 }
                 return prev - 1;
@@ -220,7 +252,6 @@ export function QuizClient() {
         }, 1000);
       } else if (isCurrentlyFullScreen) {
         setShowFullScreenWarningModal(false);
-        // Only unpause if not also paused for human presence
         if (!humanPresenceIssue) {
           setIsExamPausedByProctoring(false); 
         }
@@ -233,7 +264,7 @@ export function QuizClient() {
       if (document.visibilityState === 'hidden' && quizState === 'in_progress' && isFullScreen) {
         toast({ title: 'Tab Switch Detected', description: 'Switching tabs is not allowed. The exam is paused.', variant: 'destructive' });
         setIsExamPausedByProctoring(true);
-        setHumanPresenceIssue(false); // Clear human presence issue when tab switch takes precedence
+        setHumanPresenceIssue(false); 
       }
     };
 
@@ -317,21 +348,18 @@ export function QuizClient() {
       }
 
       if (aiAnalysisResult) {
-        // Human presence / Mic check (only after grace period)
         if (gracePeriodChecksCompleted >= PROCTORING_GRACE_PERIOD_CHECKS) {
             if (!aiAnalysisResult.isHumanDetected || !currentMicActive) {
                 setHumanPresenceIssue(true);
                 setIsExamPausedByProctoring(true);
-                 // This specific toast is now handled by the persistent Alert
-            } else if (humanPresenceIssue) { // If issue was active but now resolved
+            } else if (humanPresenceIssue) { 
                 setHumanPresenceIssue(false);
-                if (!showFullScreenWarningModal) { // Only unpause if not also in fullscreen warning
+                if (!showFullScreenWarningModal) { 
                   setIsExamPausedByProctoring(false);
                 }
             }
         }
 
-        // Other anomaly checks (book, phone, looking away) - always active if human is detected
         if (aiAnalysisResult.isHumanDetected && (aiAnalysisResult.isBookDetected || aiAnalysisResult.isPhoneDetected || aiAnalysisResult.isLookingAway)) {
           toast({
             title: 'Proctoring Alert',
@@ -339,10 +367,6 @@ export function QuizClient() {
             variant: 'destructive',
             duration: 7000,
           });
-        } else if (!aiAnalysisResult.isHumanDetected && aiAnalysisResult.anomalyReason && gracePeriodChecksCompleted >= PROCTORING_GRACE_PERIOD_CHECKS) {
-          // This condition is now handled by the humanPresenceIssue state and persistent alert.
-          // We might still want a toast if the reason is more specific than just "no human".
-          // For now, the persistent alert is the main feedback for no human.
         }
       }
 
@@ -376,12 +400,10 @@ export function QuizClient() {
         clearInterval(cameraAnalysisIntervalRef.current);
       }
     };
-  // Ensure all dependencies that could restart the interval are listed
   }, [quizState, isExamPausedByProctoring, hasCameraPermission, hasMicPermission, captureAndAnalyzeFrame, showFullScreenWarningModal, humanPresenceIssue]);
   
-  // Effect to setup mic analysis when mic permission is granted
   useEffect(() => {
-    if (hasMicPermission && (quizState === 'in_progress' || quizState === 'permission_setup')) {
+    if (hasMicPermission && (quizState === 'in_progress' || quizState === 'permission_setup' || quizState === 'instructions')) {
       setupMicrophoneAnalysis();
     }
      return () => {
@@ -431,7 +453,6 @@ export function QuizClient() {
     audioContextRef.current?.close().catch(console.error);
     audioContextRef.current = null;
 
-
     let correctAnswers = 0;
     const attemptedQuestions: QuestionAttempt[] = quizData.questions.map((q, index) => {
       if (selectedAnswers[index] === q.correctAnswerIndex) {
@@ -477,7 +498,6 @@ export function QuizClient() {
     setTimeout(() => {
         if (document.fullscreenElement) {
             setShowFullScreenWarningModal(false);
-            // Only unpause if not also paused for human presence
             if (!humanPresenceIssue) {
               setIsExamPausedByProctoring(false);
             }
@@ -506,7 +526,7 @@ export function QuizClient() {
   const videoElement = (
     <video 
         ref={videoRef} 
-        className={`bg-muted rounded-md transition-all duration-300 ease-in-out ${!hasCameraPermission ? 'hidden' : 'block'}`} 
+        className={`bg-muted rounded-md transition-all duration-300 ease-in-out w-full h-full object-cover ${!hasCameraPermission ? 'hidden' : 'block'}`} 
         autoPlay 
         muted 
         playsInline 
@@ -520,25 +540,43 @@ export function QuizClient() {
           <CardHeader>
             <CardTitle className="text-2xl text-center">Exam Security Setup</CardTitle>
             <CardDescription className="text-center">
-              This exam requires camera and microphone access for AI proctoring. Screen sharing is optional.
+              This exam requires Camera, Microphone, and Entire Screen Sharing access for AI proctoring. All are mandatory.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="space-y-3">
-              <Button onClick={requestCameraMicPermissions} className="w-full" variant={hasCameraPermission === null ? "outline" : (hasCameraPermission && hasMicPermission) ? "default" : "destructive"} disabled={hasCameraPermission === true && hasMicPermission === true}>
-                <Camera className="mr-2" /> {hasCameraPermission === null ? "Request Camera & Mic Access" : (hasCameraPermission && hasMicPermission) ? "Camera & Mic Granted" : "Camera/Mic Denied or Incomplete - Retry"}
+              <Button 
+                onClick={requestCameraMicPermissions} 
+                className="w-full" 
+                variant={(hasCameraPermission === null || hasMicPermission === null) ? "outline" : (hasCameraPermission && hasMicPermission) ? "default" : "destructive"} 
+                disabled={hasCameraPermission === true && hasMicPermission === true}
+              >
+                <Camera className="mr-2" /> 
+                {(hasCameraPermission === null || hasMicPermission === null) ? "Request Camera & Mic Access" : (hasCameraPermission && hasMicPermission) ? "Camera & Mic Granted" : "Camera/Mic Denied - Retry"}
               </Button>
-               {(hasCameraPermission === false || hasMicPermission === false) && <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Camera/Mic Required</AlertTitle><AlertDescription>Camera and Microphone access is mandatory for proctoring.</AlertDescription></Alert>}
+               {(hasCameraPermission === false || hasMicPermission === false) && <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Camera & Mic Required</AlertTitle><AlertDescription>Camera and Microphone access is mandatory.</AlertDescription></Alert>}
             </div>
             
             <div className="space-y-3">
-              <Button onClick={requestScreenSharePermission} className="w-full" variant={hasScreenPermission === null ? "outline" : hasScreenPermission ? "default" : "destructive"} disabled={hasScreenPermission === true}>
-                <ScreenShare className="mr-2" /> {hasScreenPermission === null ? "Request Screen Share (Optional)" : hasScreenPermission ? "Screen Share Granted" : "Screen Share Denied - Retry"}
+              <Button 
+                onClick={requestScreenSharePermission} 
+                className="w-full" 
+                variant={hasScreenPermission === null ? "outline" : hasScreenPermission ? "default" : "destructive"} 
+                disabled={hasScreenPermission === true}
+              >
+                <ScreenShare className="mr-2" /> 
+                {hasScreenPermission === null ? "Request Entire Screen Share" : hasScreenPermission ? "Entire Screen Share Granted" : "Screen Share Denied/Incorrect - Retry"}
               </Button>
-              {hasScreenPermission === false && <Alert variant="warning"><AlertTriangle className="h-4 w-4" /><AlertTitle>Screen Share Note</AlertTitle><AlertDescription>Screen sharing was denied or failed. It is optional for this exam.</AlertDescription></Alert>}
+              {hasScreenPermission === false && (
+                <Alert variant="destructive">
+                    <AlertTriangle className="h-4 w-4" />
+                    <AlertTitle>Entire Screen Share Required</AlertTitle>
+                    <AlertDescription>Sharing your entire screen is mandatory. If you shared a window/tab, please retry and select "Entire Screen".</AlertDescription>
+                </Alert>
+              )}
             </div>
             
-            <div className={`w-full aspect-video rounded-md overflow-hidden ${hasCameraPermission ? 'block' : 'hidden'}`}>
+            <div className={`w-full aspect-video rounded-md overflow-hidden bg-muted ${hasCameraPermission ? 'block' : 'hidden'}`}>
               {videoElement}
             </div>
             { !hasCameraPermission && quizState === 'permission_setup' && (
@@ -549,7 +587,12 @@ export function QuizClient() {
                 </Alert>
             )}
 
-            <Button onClick={startExamFlow} className="w-full" size="lg" disabled={hasCameraPermission !== true || hasMicPermission !== true}>
+            <Button 
+              onClick={startExamFlow} 
+              className="w-full" 
+              size="lg" 
+              disabled={hasCameraPermission !== true || hasMicPermission !== true || hasScreenPermission !== true}
+            >
               Continue to Instructions
             </Button>
           </CardContent>
@@ -568,24 +611,31 @@ export function QuizClient() {
                 <p>Please read the following instructions carefully before starting:</p>
                 <ul className="list-disc list-inside space-y-1 text-muted-foreground">
                     <li>The exam must be taken in fullscreen mode.</li>
-                    <li>Your camera and microphone must remain active. AI-assisted monitoring will be used.</li>
+                    <li>Your camera, microphone, and entire screen must remain shared and active. AI-assisted monitoring will be used.</li>
                     <li>Ensure you are clearly visible in the camera and your microphone is not muted.</li>
                     <li>Do not switch tabs or minimize the browser window.</li>
                     <li>Copying, pasting, and right-clicking are disabled.</li>
                     <li>Attempting to leave fullscreen, switch tabs, or if human presence/mic issues are detected, the exam will pause.</li>
                     <li>The timer will continue to run during any pauses.</li>
-                    <li>Potential anomalies (e.g., presence of books, phones, looking away) may be flagged.</li>
+                    <li>Potential anomalies (e.g., presence of books, phones, looking away) may be flagged by the AI.</li>
                 </ul>
                 <p className="font-semibold">Press "Start Exam" to enter fullscreen and begin.</p>
                 <Button onClick={beginExam} className="w-full" size="lg">
                     <Maximize className="mr-2" /> Start Exam
                 </Button>
-                 {hasCameraPermission && (
+                 {(hasCameraPermission || hasMicPermission || hasScreenPermission) && (
                     <div className="mt-4 p-2 border rounded-md">
-                        <p className="text-sm font-medium text-center mb-1">Camera Preview:</p>
-                        <div className="w-full max-w-xs mx-auto aspect-video rounded overflow-hidden">
-                           {videoElement}
-                        </div>
+                        <p className="text-sm font-medium text-center mb-1">
+                          {hasCameraPermission ? "Camera Preview:" : "Camera permission needed for preview."}
+                        </p>
+                        {hasCameraPermission && (
+                          <div className="w-full max-w-xs mx-auto aspect-video rounded overflow-hidden bg-muted">
+                            {videoElement}
+                          </div>
+                        )}
+                         <p className="text-xs text-center mt-2">
+                           Mic: {hasMicPermission ? 'Granted' : 'Needed'} | Screen: {hasScreenPermission ? 'Granted (Entire)' : 'Needed (Entire Screen)'}
+                         </p>
                     </div>
                 )}
             </CardContent>
@@ -619,13 +669,13 @@ export function QuizClient() {
   const currentQuestion: McqQuestion = quizData.questions[currentQuestionIndex];
 
   return (
-    <div className="space-y-6 md:space-y-8 relative pb-24"> {/* Added padding-bottom for fixed elements */}
+    <div className="space-y-6 md:space-y-8 relative pb-24"> 
        {quizState === 'in_progress' && (
          <>
           <div className="fixed top-2 left-2 z-[60] p-2 bg-card/80 backdrop-blur-sm rounded-md shadow-lg flex items-center space-x-2 text-xs">
-              {hasCameraPermission ? <Camera className="h-4 w-4 text-green-500" /> : <Camera className="h-4 w-4 text-red-500" />}
-              {hasMicPermission ? (isMicCurrentlyActive ? <Mic className="h-4 w-4 text-green-500" /> : <Mic className="h-4 w-4 text-yellow-500" title="Microphone inactive or low volume" />) : <Mic className="h-4 w-4 text-red-500" />}
-              {hasScreenPermission ? <ScreenShare className="h-4 w-4 text-green-500" /> : <ScreenShare className="h-4 w-4 text-yellow-500" title="Screen share not active" />}
+              {hasCameraPermission ? <Camera className="h-4 w-4 text-green-500" title="Camera Active" /> : <Camera className="h-4 w-4 text-red-500" title="Camera Inactive/Denied" />}
+              {hasMicPermission ? (isMicCurrentlyActive ? <Mic className="h-4 w-4 text-green-500" title="Microphone Active" /> : <Mic className="h-4 w-4 text-yellow-500" title="Microphone Inactive or Low Volume" />) : <Mic className="h-4 w-4 text-red-500" title="Microphone Inactive/Denied" />}
+              {hasScreenPermission ? <ScreenShare className="h-4 w-4 text-green-500" title="Screen Share Active (Entire Screen)" /> : <ScreenShare className="h-4 w-4 text-red-500" title="Screen Share Inactive/Denied or Not Entire Screen" />}
               <ShieldAlert className="h-4 w-4 text-blue-500" title="AI Monitoring Active" />
               {isAnalyzingFrame && <Loader2 className="h-4 w-4 animate-spin text-primary" title="AI Analyzing..." />}
           </div>
@@ -685,7 +735,7 @@ export function QuizClient() {
           <AlertTriangle className="h-5 w-5" />
           <AlertTitle>Exam Paused</AlertTitle>
           <AlertDescription>
-            Your exam is paused due to a potential policy violation (e.g., tab switch). Please ensure you are in fullscreen mode and focused on the exam tab.
+            Your exam is paused due to a potential policy violation (e.g., tab switch, exited fullscreen). Please ensure you are in fullscreen mode and focused on the exam tab.
           </AlertDescription>
         </Alert>
       )}
@@ -713,3 +763,4 @@ export function QuizClient() {
     </div>
   );
 }
+
