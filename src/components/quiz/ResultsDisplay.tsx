@@ -4,6 +4,7 @@
 import type { QuestionAttempt, RevisitMaterialInput, RevisitMaterialOutput, GeneratedQuizData, McqQuestion } from '@/types/quiz';
 import { generateRevisitMaterial } from '@/ai/flows/generate-revisit-material-flow';
 import type { AnalyzeQuizPerformanceOutput } from '@/ai/flows/analyze-quiz-performance';
+import { saveQuiz } from '@/services/quizService'; // Import Firestore service
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { CheckCircle2, XCircle, Lightbulb, BarChart3, Repeat, Info, Download, FileText, Loader2, RefreshCw } from 'lucide-react';
@@ -24,7 +25,7 @@ interface ResultsDisplayProps {
   analysis: AnalyzeQuizPerformanceOutput | null;
   isLoadingAnalysis: boolean;
   topic: string;
-  quizDataForRetake: GeneratedQuizData | null; // Pass the original quiz data for retake
+  quizDataForRetake: GeneratedQuizData | null; 
 }
 
 export function ResultsDisplay({
@@ -37,6 +38,7 @@ export function ResultsDisplay({
 }: ResultsDisplayProps) {
   const [isGeneratingRevisitPdf, setIsGeneratingRevisitPdf] = useState(false);
   const [revisitPdfUrl, setRevisitPdfUrl] = useState<string | null>(null);
+  const [isReattempting, setIsReattempting] = useState(false);
   const { toast } = useToast();
   const router = useRouter();
 
@@ -141,7 +143,7 @@ export function ResultsDisplay({
         yPos += lineSpacing;
 
         doc.setFont(undefined, 'normal');
-        const explanationLines = doc.splitTextToSize(section.detailedExplanation, doc.internal.pageSize.width - margin * 2 - 5);
+        const explanationLines = doc.splitTextToSize(section.detailedExplanation, doc.internal.pageSize.width - margin * 2 - 5); // -5 for slight indent
         doc.text(explanationLines, margin + 5, yPos);
         yPos += explanationLines.length * (lineSpacing - 1) + paragraphSpacing;
 
@@ -173,7 +175,7 @@ export function ResultsDisplay({
     }
   };
 
-  const handleReattemptQuiz = () => {
+  const handleReattemptQuiz = async () => {
     if (!quizDataForRetake) {
       toast({
         title: "Error",
@@ -182,40 +184,46 @@ export function ResultsDisplay({
       });
       return;
     }
+    setIsReattempting(true);
 
-    // 1. Deep clone questions from the original quiz data for this attempt
-    const originalQuestions: McqQuestion[] = JSON.parse(JSON.stringify(quizDataForRetake.questions));
+    try {
+      const originalQuestions: McqQuestion[] = JSON.parse(JSON.stringify(quizDataForRetake.questions));
+      const shuffledQuestionOrder = shuffleArray(originalQuestions);
 
-    // 2. Shuffle the order of questions
-    const shuffledQuestionOrder = shuffleArray(originalQuestions);
+      const reattemptQuestions = shuffledQuestionOrder.map(q => {
+        const correctAnswerText = q.options[q.correctAnswerIndex];
+        const shuffledOptions = shuffleArray([...q.options]);
+        const newCorrectAnswerIndex = shuffledOptions.indexOf(correctAnswerText);
+        return {
+          ...q,
+          options: shuffledOptions,
+          correctAnswerIndex: newCorrectAnswerIndex,
+        };
+      });
 
-    // 3. For each question, shuffle its options and update correctAnswerIndex
-    const reattemptQuestions = shuffledQuestionOrder.map(q => {
-      const correctAnswerText = q.options[q.correctAnswerIndex];
-      const shuffledOptions = shuffleArray([...q.options]);
-      const newCorrectAnswerIndex = shuffledOptions.indexOf(correctAnswerText);
-      return {
-        ...q,
-        options: shuffledOptions,
-        correctAnswerIndex: newCorrectAnswerIndex,
+      const newQuizDataForFirestore: Omit<GeneratedQuizData, 'id' | 'createdAt'> = {
+        topic: quizDataForRetake.topic,
+        questions: reattemptQuestions,
+        durationMinutes: quizDataForRetake.durationMinutes,
       };
-    });
 
-    // 4. Create new GeneratedQuizData
-    const newQuizData: GeneratedQuizData = {
-      id: new Date().toISOString(), // New unique ID for the re-attempt
-      topic: quizDataForRetake.topic,
-      questions: reattemptQuestions,
-      durationMinutes: quizDataForRetake.durationMinutes,
-    };
+      const newRetakeQuizId = await saveQuiz(newQuizDataForFirestore);
 
-    // 5. Save to localStorage and navigate
-    localStorage.setItem('currentQuiz', JSON.stringify(newQuizData));
-    toast({
-      title: "Quiz Ready for Re-attempt!",
-      description: "Questions and options have been shuffled. Good luck!",
-    });
-    router.push('/exam');
+      toast({
+        title: "Quiz Ready for Re-attempt!",
+        description: "Questions and options have been shuffled. Good luck!",
+      });
+      router.push(`/exam/${newRetakeQuizId}`);
+    } catch (error) {
+        console.error("Error saving re-attempt quiz:", error);
+        toast({
+            title: "Re-attempt Failed",
+            description: "Could not prepare the quiz for re-attempt. Please try again.",
+            variant: "destructive",
+        });
+    } finally {
+        setIsReattempting(false);
+    }
   };
 
 
@@ -358,14 +366,14 @@ export function ResultsDisplay({
         </CardContent>
         <CardFooter className="p-6 flex flex-col sm:flex-row justify-center gap-4">
           <Link href="/">
-            <Button size="lg" variant="outline">
+            <Button size="lg" variant="outline" disabled={isReattempting}>
               <Repeat className="mr-2 h-5 w-5" />
               Create Another Quiz
             </Button>
           </Link>
-          <Button size="lg" onClick={handleReattemptQuiz} disabled={!quizDataForRetake}>
-            <RefreshCw className="mr-2 h-5 w-5" />
-            Re-attempt This Quiz
+          <Button size="lg" onClick={handleReattemptQuiz} disabled={!quizDataForRetake || isReattempting}>
+            {isReattempting ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <RefreshCw className="mr-2 h-5 w-5" /> }
+            {isReattempting ? "Preparing..." : "Re-attempt This Quiz"}
           </Button>
         </CardFooter>
       </Card>
@@ -373,4 +381,3 @@ export function ResultsDisplay({
     </div>
   );
 }
-

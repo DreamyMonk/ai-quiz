@@ -1,29 +1,33 @@
 
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { useRouter, usePathname } from 'next/navigation'; // Import usePathname
+import { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import type { GeneratedQuizData, McqQuestion, QuestionAttempt, StudentAnswers } from '@/types/quiz';
 import { useToast } from '@/hooks/use-toast';
 import { analyzeQuizPerformance, type AnalyzeQuizPerformanceInput, type AnalyzeQuizPerformanceOutput } from '@/ai/flows/analyze-quiz-performance';
+import { getQuizById } from '@/services/quizService'; // Import Firestore service
 import { QuestionDisplay } from './QuestionDisplay';
 import { ResultsDisplay } from './ResultsDisplay';
 import { TimerDisplay } from './TimerDisplay';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Loader2, BookOpenCheck, XCircle, PlayCircle, ListRestart, Info } from 'lucide-react';
+import { Loader2, BookOpenCheck, XCircle, PlayCircle, ListRestart, Info, AlertTriangle } from 'lucide-react';
 import { CodeOfConductModal } from './CodeOfConductModal';
 import { PledgeModal } from './PledgeModal';
 
-
 const DEFAULT_QUIZ_DURATION_MINUTES = 15;
 
-export function QuizClient() {
+interface QuizClientProps {
+  quizId: string;
+}
+
+export function QuizClient({ quizId }: QuizClientProps) {
   const [quizData, setQuizData] = useState<GeneratedQuizData | null>(null);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [selectedAnswers, setSelectedAnswers] = useState<StudentAnswers>([]);
-  const [quizState, setQuizState] = useState<'loading' | 'instructions' | 'in_progress' | 'submitting' | 'results'>('loading');
+  const [quizState, setQuizState] = useState<'loading' | 'instructions' | 'in_progress' | 'submitting' | 'results' | 'error'>('loading');
   const [score, setScore] = useState(0);
   const [analysis, setAnalysis] = useState<AnalyzeQuizPerformanceOutput | null>(null);
   const [isLoadingAnalysis, setIsLoadingAnalysis] = useState(false);
@@ -31,72 +35,51 @@ export function QuizClient() {
   const [quizDurationSeconds, setQuizDurationSeconds] = useState(DEFAULT_QUIZ_DURATION_MINUTES * 60);
   const [showCodeOfConductModal, setShowCodeOfConductModal] = useState(false);
   const [showPledgeModal, setShowPledgeModal] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const router = useRouter();
-  const pathname = usePathname(); 
   const { toast } = useToast();
 
   useEffect(() => {
-    console.log("QuizClient: Main useEffect triggered. Pathname:", pathname, "Current quizState:", quizState);
-    const storedQuiz = localStorage.getItem('currentQuiz');
+    console.log("QuizClient: useEffect for quiz fetching triggered. quizId:", quizId);
+    if (!quizId) {
+      setErrorMessage("No Quiz ID provided.");
+      setQuizState('error');
+      return;
+    }
 
-    if (storedQuiz) {
+    const fetchQuiz = async () => {
+      setQuizState('loading');
+      setErrorMessage(null);
       try {
-        const parsedQuiz: GeneratedQuizData = JSON.parse(storedQuiz);
-        console.log("QuizClient: Parsed quiz from localStorage. ID:", parsedQuiz.id, "Current component quizData.id:", quizData?.id);
-
-        if (parsedQuiz && parsedQuiz.questions && parsedQuiz.questions.length > 0 && parsedQuiz.id) {
-          // CRUCIAL: If quizData is not set OR the ID in localStorage is different from the current quizData.id,
-          // it's a new quiz (or a re-attempt). Reset everything for a fresh start.
-          if (!quizData || quizData.id !== parsedQuiz.id) {
-            console.log(`QuizClient: New/different quiz ID (${parsedQuiz.id}) found in localStorage. Resetting all states for a fresh quiz.`);
-            setQuizData(parsedQuiz);
-            setSelectedAnswers(new Array(parsedQuiz.questions.length).fill(null));
-            setCurrentQuestionIndex(0);
-            setScore(0);
-            setAnalysis(null);
-            setFinalAttemptData([]);
-            setQuizState('instructions'); // <<< THIS IS KEY: Always go back to instructions for a new quiz ID
-            setQuizDurationSeconds(parsedQuiz.durationMinutes > 0 ? parsedQuiz.durationMinutes * 60 : DEFAULT_QUIZ_DURATION_MINUTES * 60);
-            console.log("QuizClient: States fully reset. New quiz ID:", parsedQuiz.id, "Quiz state set to 'instructions'.");
-          } else {
-            // Same quiz ID found in localStorage as currently in component state.
-            // This usually means a page refresh or returning to the tab for an ongoing/completed quiz.
-            console.log("QuizClient: Same quiz ID found. Current quizState:", quizState);
-            if (quizState === 'loading') {
-              // If it was 'loading' (e.g., initial page load/refresh on exam page),
-              // and the data matches, allow it to proceed to 'instructions'
-              // or 'results' if results were already generated for this quizData.id
-               if (finalAttemptData.length > 0 && analysis && quizData.id === parsedQuiz.id) {
-                 console.log("QuizClient: Resuming to 'results' state for quiz ID:", parsedQuiz.id);
-                 setQuizState('results');
-               } else {
-                 console.log("QuizClient: Resuming to 'instructions' state for quiz ID:", parsedQuiz.id);
-                 setQuizState('instructions');
-               }
-            }
-            // If quizState is already 'instructions', 'in_progress', or 'results' for the *same* quiz ID,
-            // no state change is needed here from localStorage data alone.
-          }
+        const fetchedQuiz = await getQuizById(quizId);
+        if (fetchedQuiz) {
+          console.log("QuizClient: Fetched quiz from Firestore. ID:", fetchedQuiz.id);
+          setQuizData(fetchedQuiz);
+          setSelectedAnswers(new Array(fetchedQuiz.questions.length).fill(null));
+          setCurrentQuestionIndex(0);
+          setScore(0);
+          setAnalysis(null);
+          setFinalAttemptData([]);
+          setQuizState('instructions');
+          setQuizDurationSeconds(fetchedQuiz.durationMinutes > 0 ? fetchedQuiz.durationMinutes * 60 : DEFAULT_QUIZ_DURATION_MINUTES * 60);
+          console.log("QuizClient: States reset for new quiz. quizState set to 'instructions'.");
         } else {
-          console.error("QuizClient: Invalid quiz data structure from localStorage.");
-          toast({ title: 'Error Loading Quiz', description: 'Invalid quiz data format. Please generate a new quiz.', variant: 'destructive' });
-          if (pathname === '/exam') router.push('/');
+          console.error("QuizClient: Quiz not found in Firestore for ID:", quizId);
+          toast({ title: 'Quiz Not Found', description: 'The requested quiz could not be found. It might have been deleted or the ID is incorrect.', variant: 'destructive' });
+          setErrorMessage("Quiz not found. Please check the ID or generate a new quiz.");
+          setQuizState('error');
         }
       } catch (error) {
-        console.error("QuizClient: Failed to parse quiz data from localStorage:", error);
-        toast({ title: 'Error Loading Quiz', description: 'Could not load quiz. Please generate a new quiz.', variant: 'destructive' });
-        if (pathname === '/exam') router.push('/');
+        console.error("QuizClient: Error fetching quiz from Firestore:", error);
+        toast({ title: 'Error Loading Quiz', description: `Could not load quiz data: ${(error as Error).message}`, variant: 'destructive' });
+        setErrorMessage(`Failed to load quiz: ${(error as Error).message}`);
+        setQuizState('error');
       }
-    } else {
-      // No quiz found in localStorage
-      console.log("QuizClient: No quiz found in localStorage. Current Pathname:", pathname);
-      if (pathname === '/exam') { // Only redirect if on the exam page and no quiz exists
-        toast({ title: 'No Quiz Found', description: 'Please generate a quiz first.', variant: 'destructive' });
-        router.push('/');
-      }
-    }
-  }, [pathname, quizData?.id, router, toast]); // Added router and toast as they are used in the effect.
+    };
+
+    fetchQuiz();
+  }, [quizId, toast]); // Dependency: quizId and toast
 
 
   const openPledgeModal = () => {
@@ -126,7 +109,7 @@ export function QuizClient() {
   const handleSkipQuestion = () => {
     setSelectedAnswers(prev => {
       const newAnswers = [...prev];
-      newAnswers[currentQuestionIndex] = null;
+      newAnswers[currentQuestionIndex] = null; 
       return newAnswers;
     });
 
@@ -188,11 +171,35 @@ export function QuizClient() {
   }, [quizData, selectedAnswers, toast, quizState]);
 
 
-  if (quizState === 'loading' || !quizData) {
+  if (quizState === 'loading') {
     return (
       <div className="flex flex-col items-center justify-center min-h-[calc(100vh-10rem)]">
         <Loader2 className="h-16 w-16 animate-spin text-primary mb-4" />
         <p className="text-xl text-muted-foreground">Loading Quiz...</p>
+      </div>
+    );
+  }
+  
+  if (quizState === 'error') {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[calc(100vh-10rem)] text-center p-4">
+        <AlertTriangle className="h-16 w-16 text-destructive mb-4" />
+        <h2 className="text-2xl font-semibold mb-2">Error Loading Quiz</h2>
+        <p className="text-muted-foreground mb-6">{errorMessage || "An unexpected error occurred."}</p>
+        <Button onClick={() => router.push('/')} size="lg">
+          Go to Homepage
+        </Button>
+      </div>
+    );
+  }
+
+  if (!quizData) { // Should be caught by 'loading' or 'error' state, but as a fallback
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[calc(100vh-10rem)]">
+        <p className="text-xl text-muted-foreground">Quiz data is not available.</p>
+         <Button onClick={() => router.push('/')} size="lg" className="mt-4">
+          Go to Homepage
+        </Button>
       </div>
     );
   }
@@ -232,7 +239,7 @@ export function QuizClient() {
     );
   }
 
-  if (quizData.questions.length === 0 && quizState !== 'loading') {
+  if (quizData.questions.length === 0 && quizState !== 'loading' && quizState !== 'error') {
      return (
       <div className="flex flex-col items-center justify-center min-h-[calc(100vh-10rem)] text-center">
         <XCircle className="h-16 w-16 text-destructive mb-4" />
@@ -258,6 +265,7 @@ export function QuizClient() {
   }
 
   const currentQuestion: McqQuestion = quizData.questions[currentQuestionIndex];
+  const isSubmittingOrDone = quizState === 'submitting' || quizState === 'results';
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-6 md:gap-8 relative pb-24">
@@ -269,7 +277,7 @@ export function QuizClient() {
               Quiz: {quizData.topic}
             </CardTitle>
             {(quizState === 'in_progress' || quizState === 'submitting') && (
-              <Button onClick={() => submitQuiz("Exam ended by user.")} variant="destructive" size="sm" disabled={quizState === 'submitting'}>
+              <Button onClick={() => submitQuiz("Exam ended by user.")} variant="destructive" size="sm" disabled={isSubmittingOrDone}>
                   <XCircle className="mr-2 h-4 w-4" /> End Exam
               </Button>
             )}
@@ -278,7 +286,7 @@ export function QuizClient() {
             <TimerDisplay
                 initialDurationSeconds={quizDurationSeconds}
                 onTimeUp={() => submitQuiz("Time is up!")}
-                isPaused={quizState === 'submitting' || quizState === 'results'}
+                isPaused={isSubmittingOrDone}
               />
           </CardContent>
         </Card>
@@ -296,6 +304,7 @@ export function QuizClient() {
             onSubmit={() => submitQuiz()}
             isLastQuestion={currentQuestionIndex === quizData.questions.length - 1}
             isSubmitting={quizState === 'submitting'}
+            isDisabled={isSubmittingOrDone}
           />
         )}
         {quizState === 'submitting' && !currentQuestion && ( 
@@ -324,7 +333,7 @@ export function QuizClient() {
                       variant={currentQuestionIndex === index ? 'default' : 'outline'}
                       onClick={() => setCurrentQuestionIndex(index)}
                       className="w-full justify-start text-sm h-9"
-                      disabled={quizState === 'submitting'}
+                      disabled={isSubmittingOrDone}
                     >
                       Question {index + 1}
                        {selectedAnswers[index] !== null && <span className="ml-auto text-xs opacity-70">(Answered)</span>}
@@ -341,5 +350,3 @@ export function QuizClient() {
     </div>
   );
 }
-
-    

@@ -16,11 +16,12 @@ import { useToast } from '@/hooks/use-toast';
 import { generateMcqQuestions, type GenerateMcqQuestionsOutput } from '@/ai/flows/generate-mcq-questions';
 import { generateOptionsForCustomQuestion, type GenerateOptionsForCustomQuestionOutput } from '@/ai/flows/generate-options-for-custom-question';
 import { generateSingleMcqFromUserQuery, type GenerateSingleMcqFromUserQueryOutput } from '@/ai/flows/generate-single-mcq-from-user-query';
-import type { GeneratedQuizData, McqQuestion } from '@/types/quiz';
+import type { McqQuestion, GeneratedQuizData } from '@/types/quiz';
 import { Loader2, Sparkles, Wand2, ListChecks, Clock, PencilLine } from 'lucide-react';
-import { shuffleArray } from '@/lib/utils'; // Import from lib
+import { shuffleArray } from '@/lib/utils';
+import { saveQuiz } from '@/services/quizService';
 
-// Schemas for each mode
+
 const aiGeneratedQuizSchema = z.object({
   topic: z.string().min(5, { message: "Topic must be at least 5 characters long." }).max(200, { message: "Topic must be at most 200 characters long." }),
   numberOfQuestions: z.coerce.number().int().min(3, "Must be at least 3 questions.").max(10, "Cannot exceed 10 questions for AI generation."),
@@ -41,29 +42,25 @@ const customQuizSchema = z.object({
 
       for (const line of lines) {
         if (questionStartRegex.test(line)) {
-          if (currentBlockLines > 0) { // Previous block ended
+          if (currentBlockLines > 0) { 
              questionCount++;
           }
-          currentBlockLines = 1; // Start a new block
-        } else if (line.trim()) { // Line is not empty
-            if (currentBlockLines === 0) { // This line is a standalone prompt
+          currentBlockLines = 1; 
+        } else if (line.trim()) { 
+            if (currentBlockLines === 0) { 
                 questionCount++;
-            } else { // This line is part of the current block
+            } else { 
                 currentBlockLines++;
             }
         }
-        // If a block ends and is a full MCQ (question, 4 options, 1 answer = 6 lines min)
-        // or if a line is a standalone prompt, it's counted.
-        // This logic tries to count "items" that will turn into questions.
       }
-      if (currentBlockLines > 0) questionCount++; // count the last block/prompt
+      if (currentBlockLines > 0) questionCount++; 
 
       return questionCount <= 100;
     }, { message: "You can add a maximum of 100 questions/prompts or fully formatted MCQs."}),
   customQuizDuration: z.coerce.number().int().min(1, "Minimum 1 minute.").max(180, "Maximum 180 minutes."),
 });
 
-// Combined schema using a discriminated union
 const formSchema = z.discriminatedUnion("quizMode", [
   z.object({ quizMode: z.literal("ai") }).merge(aiGeneratedQuizSchema),
   z.object({ quizMode: z.literal("custom") }).merge(customQuizSchema),
@@ -81,14 +78,12 @@ const defaultValues: QuizSettingsFormValues = {
   customQuizDuration: 15,
 };
 
-
-// Helper function to parse fully formatted MCQ blocks
 function parseFullMcqBlock(lines: string[]): McqQuestion | null {
   if (lines.length < 3) return null;
 
   const questionNumberRegex = /^\s*\d+[.)]\s*/;
-  const optionLabelRegex = /^\s*([A-Da-d])[.)]\s+/i; // Capture the option letter
-  const answerLineRegex = /^\s*Answer:\s*([A-Da-d])\s*(?:\((.*?)\))?\s*$/i; // Capture answer letter, optionally explanation
+  const optionLabelRegex = /^\s*([A-Da-d])[.)]\s+/i; 
+  const answerLineRegex = /^\s*Answer:\s*([A-Da-d])\s*(?:\((.*?)\))?\s*$/i; 
 
   let questionText = "";
   const parsedOptions: { letter: string, text: string }[] = [];
@@ -100,7 +95,6 @@ function parseFullMcqBlock(lines: string[]): McqQuestion | null {
   questionText = potentialQuestionLine;
 
   let lineIndex = 1;
-  // Parse options
   while(lineIndex < lines.length && parsedOptions.length < 4) {
     const currentLine = lines[lineIndex].trim();
     const optionMatch = currentLine.match(optionLabelRegex);
@@ -108,27 +102,22 @@ function parseFullMcqBlock(lines: string[]): McqQuestion | null {
     if (optionMatch && optionMatch[1]) {
       parsedOptions.push({ letter: optionMatch[1].toUpperCase(), text: currentLine.replace(optionLabelRegex, "").trim() });
     } else if (answerLineRegex.test(currentLine) || questionNumberRegex.test(currentLine)) {
-      // Reached answer line or start of a new question, stop parsing options for current block
       break;
     } else if (parsedOptions.length > 0) {
-      // This line is part of the previous option (multi-line option)
       parsedOptions[parsedOptions.length -1].text += `\n${currentLine}`;
     } else {
-      // This line is part of the question (multi-line question)
       questionText += `\n${currentLine}`;
     }
     lineIndex++;
   }
 
-  // Parse answer line (could be after options or further down if options were multi-line)
   while(lineIndex < lines.length) {
     const currentLine = lines[lineIndex].trim();
     const answerMatch = currentLine.match(answerLineRegex);
     if (answerMatch && answerMatch[1]) {
         correctAnswerLetter = answerMatch[1].toUpperCase();
-        break; // Found the answer
+        break; 
     }
-    // If it's a new question starting and we haven't found an answer for the current one, this block is malformed.
     if (questionNumberRegex.test(currentLine) && correctAnswerLetter === null) return null;
     lineIndex++;
   }
@@ -138,7 +127,7 @@ function parseFullMcqBlock(lines: string[]): McqQuestion | null {
   }
 
   const validOptionLetters = ["A", "B", "C", "D"];
-  if (!validOptionLetters.includes(correctAnswerLetter)) return null; // Invalid answer letter
+  if (!validOptionLetters.includes(correctAnswerLetter)) return null; 
 
   const originalOptionTexts = parsedOptions.map(opt => opt.text);
   const originalCorrectAnswerText = originalOptionTexts[validOptionLetters.indexOf(correctAnswerLetter)];
@@ -172,6 +161,8 @@ export default function HomePage() {
 
   const onSubmit: SubmitHandler<QuizSettingsFormValues> = async (data) => {
     setIsLoading(true);
+    let quizDataForFirestore: Omit<GeneratedQuizData, 'id' | 'createdAt'> | null = null;
+
     try {
       if (data.quizMode === "ai") {
         toast({
@@ -184,8 +175,7 @@ export default function HomePage() {
         });
 
         if (result.questions && result.questions.length > 0) {
-          const quizData: GeneratedQuizData = {
-            id: new Date().toISOString(), // Unique ID for this quiz instance
+          quizDataForFirestore = {
             topic: data.topic,
             questions: result.questions.map(q => ({
               question: q.question,
@@ -194,18 +184,14 @@ export default function HomePage() {
             })),
             durationMinutes: data.quizDuration,
           };
-          localStorage.setItem('currentQuiz', JSON.stringify(quizData));
-          toast({
-            title: 'AI Quiz Generated!',
-            description: `Generated ${quizData.questions.length} questions on "${data.topic}". Redirecting...`,
-          });
-          router.push('/exam');
         } else {
           toast({
             title: 'No Questions Generated (AI)',
             description: 'The AI could not generate questions for this topic/configuration. Please try again.',
             variant: 'destructive',
           });
+          setIsLoading(false);
+          return;
         }
       } else if (data.quizMode === "custom") {
         toast({
@@ -237,7 +223,6 @@ export default function HomePage() {
           if (fullMcq) {
             return fullMcq;
           } else {
-            // Block wasn't a full MCQ, process lines within it individually
             const singleLinePromises = block.map(async (lineContent) => {
               const trimmedPrompt = lineContent.trim();
               if (!trimmedPrompt) return null;
@@ -311,7 +296,6 @@ export default function HomePage() {
           }
         });
         
-
         if (anyErrors && processedQuestions.length === 0) {
              toast({
                 title: 'Custom Quiz Processing Failed',
@@ -331,29 +315,33 @@ export default function HomePage() {
             return;
         }
 
-
         if (processedQuestions.length > 0) {
           const finalQuestions = shuffleArray(processedQuestions);
-          const quizData: GeneratedQuizData = {
-            id: new Date().toISOString(), // Unique ID for this quiz instance
+          quizDataForFirestore = {
             topic: data.customQuizTitle,
             questions: finalQuestions,
             durationMinutes: data.customQuizDuration,
           };
-          localStorage.setItem('currentQuiz', JSON.stringify(quizData));
-          toast({
-            title: 'Custom Quiz Ready!',
-            description: `Your quiz "${data.customQuizTitle}" with ${finalQuestions.length} questions is ready. Redirecting...`,
-          });
-          router.push('/exam');
         } else if (allLines.length === 0) {
            toast({
             title: 'No Prompts Provided',
             description: 'Please enter at least one question or topic for your custom quiz.',
             variant: 'destructive',
           });
+          setIsLoading(false);
+          return;
         }
       }
+
+      if (quizDataForFirestore) {
+        const newQuizId = await saveQuiz(quizDataForFirestore);
+        toast({
+          title: 'Quiz Saved!',
+          description: `Your quiz "${quizDataForFirestore.topic}" is ready. Redirecting...`,
+        });
+        router.push(`/exam/${newQuizId}`);
+      }
+
     } catch (error) {
       console.error("Error in quiz submission process:", error);
       toast({
@@ -581,5 +569,3 @@ The French Revolution
     </div>
   );
 }
-
-    
