@@ -3,7 +3,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useForm, type SubmitHandler, useFieldArray } from 'react-hook-form';
+import { useForm, type SubmitHandler } from 'react-hook-form'; // Removed useFieldArray
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { Button } from '@/components/ui/button';
@@ -17,7 +17,7 @@ import { generateMcqQuestions, type GenerateMcqQuestionsOutput } from '@/ai/flow
 import { generateOptionsForCustomQuestion, type GenerateOptionsForCustomQuestionOutput } from '@/ai/flows/generate-options-for-custom-question';
 import { generateSingleMcqFromUserQuery, type GenerateSingleMcqFromUserQueryOutput } from '@/ai/flows/generate-single-mcq-from-user-query';
 import type { GeneratedQuizData, McqQuestion } from '@/types/quiz';
-import { Loader2, Sparkles, Wand2, ListChecks, Clock, PlusCircle, Trash2, PencilLine } from 'lucide-react';
+import { Loader2, Sparkles, Wand2, ListChecks, Clock, PencilLine } from 'lucide-react'; // Removed PlusCircle, Trash2
 
 // Schemas for each mode
 const aiGeneratedQuizSchema = z.object({
@@ -26,14 +26,14 @@ const aiGeneratedQuizSchema = z.object({
   quizDuration: z.coerce.number().int().min(1, "Minimum 1 minute.").max(120, "Maximum 120 minutes."),
 });
 
-const customQuestionSchema = z.object({
-  // Single prompt for question and optional answer
-  customPrompt: z.string().min(5, "Prompt must be at least 5 characters.").max(700, "Prompt is too long (max 700 characters)."),
-});
-
+// Updated customQuizSchema to use a single textarea for all prompts
 const customQuizSchema = z.object({
   customQuizTitle: z.string().min(3, "Quiz title must be at least 3 characters.").max(100, "Quiz title too long."),
-  customQuestions: z.array(customQuestionSchema).min(1, "Please add at least one question prompt.").max(10, "Maximum 10 custom questions."),
+  customPromptsBlock: z.string()
+    .min(5, { message: "Please provide at least one question, topic, or prompt (min 5 characters for the entire block)." })
+    .max(15000, { message: "The total text for custom questions is too long (max 15000 characters)." })
+    .refine(value => value.trim().split('\n').filter(line => line.trim() !== '').length > 0, { message: "Please add at least one question or prompt."})
+    .refine(value => value.trim().split('\n').filter(line => line.trim() !== '').length <= 20, { message: "You can add a maximum of 20 questions/prompts (each on a new line)."}),
   customQuizDuration: z.coerce.number().int().min(1, "Minimum 1 minute.").max(180, "Maximum 180 minutes."),
 });
 
@@ -45,6 +45,16 @@ const formSchema = z.discriminatedUnion("quizMode", [
 
 type QuizSettingsFormValues = z.infer<typeof formSchema>;
 
+const defaultValues: QuizSettingsFormValues = {
+  quizMode: "ai",
+  topic: '',
+  numberOfQuestions: 5,
+  quizDuration: 10,
+  customQuizTitle: '',
+  customPromptsBlock: '', // Changed from customQuestions array
+  customQuizDuration: 15,
+};
+
 export default function HomePage() {
   const [isLoading, setIsLoading] = useState(false);
   const router = useRouter();
@@ -52,23 +62,12 @@ export default function HomePage() {
 
   const form = useForm<QuizSettingsFormValues>({
     resolver: zodResolver(formSchema),
-    defaultValues: {
-      quizMode: "ai",
-      topic: '',
-      numberOfQuestions: 5,
-      quizDuration: 10,
-      customQuizTitle: '',
-      customQuestions: [{ customPrompt: '' }],
-      customQuizDuration: 15,
-    },
+    defaultValues: defaultValues,
   });
 
   const quizMode = form.watch("quizMode");
 
-  const { fields, append, remove } = useFieldArray({
-    control: form.control,
-    name: "customQuestions" as any, // Cast due to discriminated union complexity with useFieldArray
-  });
+  // Removed useFieldArray: const { fields, append, remove } = useFieldArray(...)
 
   const onSubmit: SubmitHandler<QuizSettingsFormValues> = async (data) => {
     setIsLoading(true);
@@ -116,9 +115,12 @@ export default function HomePage() {
         const processedQuestions: McqQuestion[] = [];
         const ansPattern = /^(?<questionText>.+?)\s*\(ans\)(?<correctAnswerText>.+?)\(ans\)\s*$/i;
 
-        for (const customQ of data.customQuestions) {
-          const promptText = customQ.customPrompt.trim();
-          const match = promptText.match(ansPattern);
+        // Process customPromptsBlock
+        const promptsArray = data.customPromptsBlock.trim().split('\n').filter(line => line.trim() !== '');
+
+        for (const promptText of promptsArray) {
+          const trimmedPrompt = promptText.trim();
+          const match = trimmedPrompt.match(ansPattern);
 
           try {
             if (match && match.groups && match.groups.questionText.trim() && match.groups.correctAnswerText.trim()) {
@@ -137,7 +139,7 @@ export default function HomePage() {
             } else {
               // No valid (ans) pattern, or parts are missing. Treat as a prompt for full MCQ generation.
               const singleMcqResult: GenerateSingleMcqFromUserQueryOutput = await generateSingleMcqFromUserQuery({
-                userQuery: promptText,
+                userQuery: trimmedPrompt,
               });
               if (singleMcqResult && singleMcqResult.question) {
                 processedQuestions.push({
@@ -150,9 +152,9 @@ export default function HomePage() {
               }
             }
           } catch (err) {
-            console.error("Error processing custom prompt:", promptText, err);
+            console.error("Error processing custom prompt:", trimmedPrompt, err);
             toast({
-              title: `Error with prompt: "${promptText.substring(0, 30)}..."`,
+              title: `Error with prompt: "${trimmedPrompt.substring(0, 30)}..."`,
               description: `AI failed to process this prompt. ${(err as Error).message}. Please review it or try again.`,
               variant: 'destructive',
             });
@@ -161,7 +163,7 @@ export default function HomePage() {
           }
         }
 
-        if (processedQuestions.length === data.customQuestions.length) {
+        if (processedQuestions.length === promptsArray.length && promptsArray.length > 0) {
           const quizData: GeneratedQuizData = {
             id: new Date().toISOString(),
             topic: data.customQuizTitle,
@@ -174,7 +176,14 @@ export default function HomePage() {
             description: `Your quiz "${data.customQuizTitle}" with ${processedQuestions.length} questions is ready. Redirecting...`,
           });
           router.push('/exam');
-        } else {
+        } else if (promptsArray.length === 0) {
+           toast({
+            title: 'No Prompts Provided',
+            description: 'Please enter at least one question or topic for your custom quiz.',
+            variant: 'destructive',
+          });
+        }
+        else {
           toast({
             title: 'Error Processing Custom Quiz',
             description: 'Could not process all custom question prompts. Please check inputs.',
@@ -205,7 +214,7 @@ export default function HomePage() {
           <CardDescription className="text-lg text-muted-foreground pt-2">
             {quizMode === 'ai' 
               ? "Let AI craft a quiz for you, or switch to custom mode to build your own!"
-              : "Build your own quiz. Provide topics, full questions, or questions with answers like 'Question (ans)Answer(ans)'. AI will fill in the blanks!"}
+              : "Build your own quiz. Paste questions/topics below (one per line). AI will fill in the blanks!"}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -221,21 +230,26 @@ export default function HomePage() {
                       <RadioGroup
                         onValueChange={(value) => {
                           field.onChange(value);
+                          const currentValues = form.getValues();
                           if (value === "ai") {
-                            form.reset({ 
-                              ...form.getValues(), 
-                              quizMode: "ai", 
-                              customQuizTitle: '', 
-                              customQuestions: [{ customPrompt: '' }],
-                              customQuizDuration: 15,
+                            form.reset({
+                              quizMode: "ai",
+                              topic: currentValues.topic || defaultValues.topic,
+                              numberOfQuestions: currentValues.numberOfQuestions || defaultValues.numberOfQuestions,
+                              quizDuration: currentValues.quizDuration || defaultValues.quizDuration,
+                              customQuizTitle: defaultValues.customQuizTitle,
+                              customPromptsBlock: defaultValues.customPromptsBlock,
+                              customQuizDuration: defaultValues.customQuizDuration,
                             });
-                          } else {
-                             form.reset({ 
-                              ...form.getValues(), 
+                          } else { // Switching to "custom"
+                            form.reset({
                               quizMode: "custom",
-                              topic: '',
-                              numberOfQuestions: 5,
-                              quizDuration: 10,
+                              customQuizTitle: currentValues.customQuizTitle || defaultValues.customQuizTitle,
+                              customPromptsBlock: currentValues.customPromptsBlock || defaultValues.customPromptsBlock,
+                              customQuizDuration: currentValues.customQuizDuration || defaultValues.customQuizDuration,
+                              topic: defaultValues.topic,
+                              numberOfQuestions: defaultValues.numberOfQuestions,
+                              quizDuration: defaultValues.quizDuration,
                             });
                           }
                         }}
@@ -329,57 +343,38 @@ export default function HomePage() {
                     )}
                   />
                   
-                  <div>
-                    <FormLabel className="text-base mb-2 block">Your Question Prompts</FormLabel>
-                    <FormDescription className="text-sm text-muted-foreground mb-3">
-                      For each prompt:
-                      <ul className="list-disc list-inside pl-4">
-                        <li>Enter a topic (e.g., 'Dinosaurs') and AI will create a question.</li>
-                        <li>Enter a full question (e.g., 'What is the largest planet?'). AI will generate options.</li>
-                        <li>Or, specify the answer: 'The capital of Italy is (ans)Rome(ans)'. AI will create other options.</li>
-                      </ul>
-                    </FormDescription>
-                    {fields.map((item, index) => (
-                      <Card key={item.id} className="p-4 space-y-4 mb-4 border border-border shadow-sm bg-secondary/30">
-                        <div className="flex justify-between items-center">
-                          <FormLabel className="text-md font-semibold">Prompt {index + 1}</FormLabel>
-                          {fields.length > 1 && (
-                            <Button type="button" variant="ghost" size="icon" onClick={() => remove(index)} disabled={isLoading} className="h-8 w-8">
-                              <Trash2 className="h-4 w-4 text-destructive" />
-                              <span className="sr-only">Remove question</span>
-                            </Button>
-                          )}
-                        </div>
-                        <FormField
-                          control={form.control}
-                          name={`customQuestions.${index}.customPrompt`}
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel className="text-sm sr-only">Question Prompt</FormLabel>
-                              <FormControl>
-                                <Textarea 
-                                  placeholder="e.g., 'Photosynthesis basics' or 'What is 2+2? (ans)4(ans)'" 
-                                  {...field} 
-                                  disabled={isLoading} 
-                                  className="text-base min-h-[100px]" 
-                                />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                      </Card>
-                    ))}
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => append({ customPrompt: '' })}
-                      disabled={isLoading || fields.length >= 10}
-                      className="mt-2 w-full sm:w-auto"
-                    >
-                      <PlusCircle className="mr-2 h-4 w-4" /> Add Prompt {fields.length >=10 && "(Max 10)"}
-                    </Button>
-                  </div>
+                  <FormField
+                    control={form.control}
+                    name="customPromptsBlock"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-base">Your Questions & Prompts</FormLabel>
+                         <FormDescription className="text-sm text-muted-foreground mb-2">
+                          Enter each question or topic on a new line (max 20).
+                          <ul className="list-disc list-inside pl-4 mt-1">
+                            <li>To let AI generate a full MCQ: type a topic (e.g., <code className="bg-muted px-1 rounded-sm">Ancient Rome</code>) or a question (e.g., <code className="bg-muted px-1 rounded-sm">What is the speed of light?</code>).</li>
+                            <li>To specify an answer: use the format <code className="bg-muted px-1 rounded-sm">Question Text (ans)Correct Answer(ans)</code>. <br/>
+                              Example: <code className="bg-muted px-1 rounded-sm">The Earth revolves around the (ans)Sun(ans)</code>
+                            </li>
+                          </ul>
+                        </FormDescription>
+                        <FormControl>
+                          <Textarea
+                            placeholder="What is 2+2? (ans)4(ans)
+Carbon Dioxide
+The French Revolution
+..."
+                            className="resize-y min-h-[200px] md:min-h-[250px] text-base"
+                            {...field}
+                            disabled={isLoading}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  
+                  {/* Removed individual prompt cards and Add Prompt button */}
 
                   <FormField
                     control={form.control}
