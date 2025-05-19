@@ -4,10 +4,10 @@
 import type { QuestionAttempt, RevisitMaterialInput, RevisitMaterialOutput, GeneratedQuizData, McqQuestion } from '@/types/quiz';
 import { generateRevisitMaterial } from '@/ai/flows/generate-revisit-material-flow';
 import type { AnalyzeQuizPerformanceOutput } from '@/ai/flows/analyze-quiz-performance';
-import { saveQuiz } from '@/services/quizService'; // Import Firestore service
+import { saveQuiz } from '@/services/quizService';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { CheckCircle2, XCircle, Lightbulb, BarChart3, Repeat, Info, Download, FileText, Loader2, RefreshCw } from 'lucide-react';
+import { CheckCircle2, XCircle, Lightbulb, BarChart3, Repeat, Info, Download, FileText, Loader2, RefreshCw, Eye, ChevronLeft } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import Link from 'next/link';
@@ -39,6 +39,7 @@ export function ResultsDisplay({
   const [isGeneratingRevisitPdf, setIsGeneratingRevisitPdf] = useState(false);
   const [revisitPdfUrl, setRevisitPdfUrl] = useState<string | null>(null);
   const [isReattempting, setIsReattempting] = useState(false);
+  const [viewMode, setViewMode] = useState<'summary' | 'detailed'>('summary');
   const { toast } = useToast();
   const router = useRouter();
 
@@ -187,10 +188,19 @@ export function ResultsDisplay({
     setIsReattempting(true);
 
     try {
+      // Ensure quizDataForRetake.questions exists and is an array
+      if (!quizDataForRetake.questions || !Array.isArray(quizDataForRetake.questions)) {
+        throw new Error("Invalid questions data in quizDataForRetake.");
+      }
+
       const originalQuestions: McqQuestion[] = JSON.parse(JSON.stringify(quizDataForRetake.questions));
       const shuffledQuestionOrder = shuffleArray(originalQuestions);
 
       const reattemptQuestions = shuffledQuestionOrder.map(q => {
+        if (!q.options || !Array.isArray(q.options) || typeof q.correctAnswerIndex !== 'number' || q.correctAnswerIndex < 0 || q.correctAnswerIndex >= q.options.length) {
+          console.warn("Skipping malformed question during re-attempt shuffle:", q);
+          return q; // Or handle more gracefully, e.g., by filtering out malformed questions
+        }
         const correctAnswerText = q.options[q.correctAnswerIndex];
         const shuffledOptions = shuffleArray([...q.options]);
         const newCorrectAnswerIndex = shuffledOptions.indexOf(correctAnswerText);
@@ -201,13 +211,19 @@ export function ResultsDisplay({
         };
       });
 
-      const newQuizDataForFirestore: Omit<GeneratedQuizData, 'id' | 'createdAt'> = {
+      const newQuizDataForFirestore: Omit<GeneratedQuizData, 'id' | 'createdAt' | 'userId'> = {
         topic: quizDataForRetake.topic,
         questions: reattemptQuestions,
         durationMinutes: quizDataForRetake.durationMinutes,
+        // userId will be set by saveQuiz if user is logged in
       };
 
-      const newRetakeQuizId = await saveQuiz(newQuizDataForFirestore);
+      // Ensure user is passed to saveQuiz if available (though saveQuiz can handle null)
+      // const currentUserId = quizDataForRetake.userId || null; 
+      // saveQuiz will handle getting current user from AuthContext if needed, or you can pass it.
+      // For simplicity, saveQuiz can be modified to take userId or get it from context. Assuming it does.
+      
+      const newRetakeQuizId = await saveQuiz(newQuizDataForFirestore, quizDataForRetake.userId || null);
 
       toast({
         title: "Quiz Ready for Re-attempt!",
@@ -218,7 +234,7 @@ export function ResultsDisplay({
         console.error("Error saving re-attempt quiz:", error);
         toast({
             title: "Re-attempt Failed",
-            description: "Could not prepare the quiz for re-attempt. Please try again.",
+            description: (error as Error).message || "Could not prepare the quiz for re-attempt. Please try again.",
             variant: "destructive",
         });
     } finally {
@@ -246,7 +262,7 @@ export function ResultsDisplay({
 
           {isLoadingAnalysis && !analysis && (
             <div className="text-center py-6">
-              <Lightbulb className="mx-auto h-8 w-8 animate-pulse text-primary mb-2" />
+              <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary mb-2" />
               <p className="text-muted-foreground">AI is analyzing your performance...</p>
             </div>
           )}
@@ -304,65 +320,82 @@ export function ResultsDisplay({
           </div>
 
 
-          <div>
-            <h3 className="text-2xl font-semibold mb-4 mt-8 text-center">Detailed Question Review</h3>
-            <Accordion type="single" collapsible className="w-full">
-              {questionsAttempted.map((attempt, index) => (
-                <AccordionItem value={`item-${index}`} key={index}>
-                  <AccordionTrigger className="text-lg hover:no-underline">
-                    <div className="flex items-center text-left">
-                      {attempt.studentAnswerIndex === attempt.correctAnswerIndex ? (
-                        <CheckCircle2 className="h-6 w-6 mr-3 text-green-500 flex-shrink-0" />
-                      ) : (
-                        <XCircle className="h-6 w-6 mr-3 text-red-500 flex-shrink-0" />
+          {viewMode === 'summary' && (
+            <div className="text-center mt-8">
+              <Button onClick={() => setViewMode('detailed')} size="lg" variant="outline">
+                <Eye className="mr-2 h-5 w-5" />
+                View Detailed Question Review
+              </Button>
+            </div>
+          )}
+
+          {viewMode === 'detailed' && (
+            <div>
+              <div className="flex justify-between items-center mb-4 mt-8">
+                <h3 className="text-2xl font-semibold">Detailed Question Review</h3>
+                <Button onClick={() => setViewMode('summary')} variant="outline">
+                  <ChevronLeft className="mr-2 h-5 w-5" />
+                  Back to Summary
+                </Button>
+              </div>
+              <Accordion type="single" collapsible className="w-full">
+                {questionsAttempted.map((attempt, index) => (
+                  <AccordionItem value={`item-${index}`} key={index}>
+                    <AccordionTrigger className="text-lg hover:no-underline">
+                      <div className="flex items-center text-left">
+                        {attempt.studentAnswerIndex === attempt.correctAnswerIndex ? (
+                          <CheckCircle2 className="h-6 w-6 mr-3 text-green-500 flex-shrink-0" />
+                        ) : (
+                          <XCircle className="h-6 w-6 mr-3 text-red-500 flex-shrink-0" />
+                        )}
+                        <span className="flex-1">Question {index + 1}: {attempt.question.length > 50 ? attempt.question.substring(0,50) + "..." : attempt.question}</span>
+                      </div>
+                    </AccordionTrigger>
+                    <AccordionContent className="px-4 py-2 space-y-3 bg-slate-50 dark:bg-slate-800 rounded-b-md">
+                      <p className="text-base font-medium mb-2">{attempt.question}</p>
+                      <ul className="space-y-1 list-inside">
+                        {attempt.options.map((option, optIndex) => (
+                          <li key={optIndex} className={`flex items-start ${getOptionClass(index, optIndex)}`}>
+                            {optIndex === attempt.correctAnswerIndex && <CheckCircle2 className="h-5 w-5 mr-2 mt-0.5 text-green-500 flex-shrink-0" />}
+                            {optIndex === attempt.studentAnswerIndex && optIndex !== attempt.correctAnswerIndex && <XCircle className="h-5 w-5 mr-2 mt-0.5 text-red-500 flex-shrink-0" />}
+                            {! (optIndex === attempt.correctAnswerIndex || (optIndex === attempt.studentAnswerIndex && optIndex !== attempt.correctAnswerIndex)) && <div className="w-5 h-5 mr-2 mt-0.5 flex-shrink-0"></div> }
+                            <span>{String.fromCharCode(65 + optIndex)}. {option}</span>
+                          </li>
+                        ))}
+                      </ul>
+                      {attempt.studentAnswerIndex !== attempt.correctAnswerIndex && attempt.studentAnswerIndex !== null && (
+                        <p className="text-sm text-muted-foreground">Your answer: <span className="font-semibold">{attempt.options[attempt.studentAnswerIndex!]}</span></p>
                       )}
-                      <span className="flex-1">Question {index + 1}: {attempt.question.length > 50 ? attempt.question.substring(0,50) + "..." : attempt.question}</span>
-                    </div>
-                  </AccordionTrigger>
-                  <AccordionContent className="px-4 py-2 space-y-3 bg-slate-50 dark:bg-slate-800 rounded-b-md">
-                    <p className="text-base font-medium mb-2">{attempt.question}</p>
-                    <ul className="space-y-1 list-inside">
-                      {attempt.options.map((option, optIndex) => (
-                        <li key={optIndex} className={`flex items-start ${getOptionClass(index, optIndex)}`}>
-                          {optIndex === attempt.correctAnswerIndex && <CheckCircle2 className="h-5 w-5 mr-2 mt-0.5 text-green-500 flex-shrink-0" />}
-                          {optIndex === attempt.studentAnswerIndex && optIndex !== attempt.correctAnswerIndex && <XCircle className="h-5 w-5 mr-2 mt-0.5 text-red-500 flex-shrink-0" />}
-                          {! (optIndex === attempt.correctAnswerIndex || (optIndex === attempt.studentAnswerIndex && optIndex !== attempt.correctAnswerIndex)) && <div className="w-5 h-5 mr-2 mt-0.5 flex-shrink-0"></div> }
-                           <span>{String.fromCharCode(65 + optIndex)}. {option}</span>
-                        </li>
-                      ))}
-                    </ul>
-                    {attempt.studentAnswerIndex !== attempt.correctAnswerIndex && attempt.studentAnswerIndex !== null && (
-                      <p className="text-sm text-muted-foreground">Your answer: <span className="font-semibold">{attempt.options[attempt.studentAnswerIndex!]}</span></p>
-                    )}
-                     {attempt.studentAnswerIndex === null && (
-                      <p className="text-sm text-yellow-600 font-semibold">You did not answer this question.</p>
-                    )}
-                    <p className="text-sm text-green-700">Correct answer: <span className="font-semibold">{attempt.options[attempt.correctAnswerIndex]}</span></p>
-                    
-                    {analysis && analysis.questionExplanations && analysis.questionExplanations[index] && (
-                      <Card className="mt-4 bg-primary/5 dark:bg-primary/10">
-                        <CardHeader className="pb-2 pt-4">
-                          <CardTitle className="text-md flex items-center text-primary">
-                            <Info className="mr-2 h-5 w-5" />
-                            AI Explanation
-                          </CardTitle>
-                        </CardHeader>
-                        <CardContent className="text-sm text-foreground/90">
-                          <p className="whitespace-pre-wrap">{analysis.questionExplanations[index]}</p>
-                        </CardContent>
-                      </Card>
-                    )}
-                     {isLoadingAnalysis && !(analysis && analysis.questionExplanations && analysis.questionExplanations[index]) && (
-                       <div className="text-left py-3">
-                         <Lightbulb className="inline-block h-5 w-5 animate-pulse text-primary mr-1" />
-                         <span className="text-sm text-muted-foreground">Loading explanation...</span>
-                       </div>
-                    )}
-                  </AccordionContent>
-                </AccordionItem>
-              ))}
-            </Accordion>
-          </div>
+                      {attempt.studentAnswerIndex === null && (
+                        <p className="text-sm text-yellow-600 font-semibold">You did not answer this question.</p>
+                      )}
+                      <p className="text-sm text-green-700">Correct answer: <span className="font-semibold">{attempt.options[attempt.correctAnswerIndex]}</span></p>
+                      
+                      {analysis && analysis.questionExplanations && analysis.questionExplanations[index] && (
+                        <Card className="mt-4 bg-primary/5 dark:bg-primary/10">
+                          <CardHeader className="pb-2 pt-4">
+                            <CardTitle className="text-md flex items-center text-primary">
+                              <Info className="mr-2 h-5 w-5" />
+                              AI Explanation
+                            </CardTitle>
+                          </CardHeader>
+                          <CardContent className="text-sm text-foreground/90">
+                            <p className="whitespace-pre-wrap">{analysis.questionExplanations[index]}</p>
+                          </CardContent>
+                        </Card>
+                      )}
+                      {isLoadingAnalysis && !(analysis && analysis.questionExplanations && analysis.questionExplanations[index]) && (
+                        <div className="text-left py-3">
+                          <Loader2 className="inline-block h-5 w-5 animate-spin text-primary mr-1" />
+                          <span className="text-sm text-muted-foreground">Loading explanation...</span>
+                        </div>
+                      )}
+                    </AccordionContent>
+                  </AccordionItem>
+                ))}
+              </Accordion>
+            </div>
+          )}
         </CardContent>
         <CardFooter className="p-6 flex flex-col sm:flex-row justify-center gap-4">
           <Link href="/">
