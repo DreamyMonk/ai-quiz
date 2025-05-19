@@ -1,0 +1,137 @@
+"use client";
+
+import type { QuestionAttempt } from '@/types/quiz';
+import type { AnalyzeQuizPerformanceOutput } from '@/ai/flows/analyze-quiz-performance';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { CheckCircle2, XCircle, Lightbulb, BarChart3, Repeat } from 'lucide-react';
+import { Progress } from '@/components/ui/progress';
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import Link from 'next/link';
+
+interface ResultsDisplayProps {
+  score: number;
+  questionsAttempted: QuestionAttempt[];
+  analysis: AnalyzeQuizPerformanceOutput | null;
+  isLoadingAnalysis: boolean;
+  topic: string;
+}
+
+export function ResultsDisplay({
+  score,
+  questionsAttempted,
+  analysis,
+  isLoadingAnalysis,
+  topic,
+}: ResultsDisplayProps) {
+  const getOptionClass = (qIndex: number, optionIndex: number) => {
+    const attempt = questionsAttempted[qIndex];
+    if (optionIndex === attempt.correctAnswerIndex) {
+      return 'text-green-600 font-semibold';
+    }
+    if (optionIndex === attempt.studentAnswerIndex && optionIndex !== attempt.correctAnswerIndex) {
+      return 'text-red-600 line-through';
+    }
+    return '';
+  };
+  
+  const scoreColor = score >= 70 ? 'text-green-500' : score >= 40 ? 'text-yellow-500' : 'text-red-500';
+
+  return (
+    <div className="space-y-8">
+      <Card className="w-full shadow-xl overflow-hidden">
+        <CardHeader className="bg-secondary/50 p-6 text-center">
+           <div className="mx-auto bg-primary/10 p-4 rounded-full w-fit mb-4">
+             <BarChart3 className="h-12 w-12 text-primary" />
+           </div>
+          <CardTitle className="text-4xl font-bold">Quiz Results</CardTitle>
+          <CardDescription className="text-xl text-muted-foreground pt-1">Topic: {topic}</CardDescription>
+        </CardHeader>
+        <CardContent className="p-6 md:p-8 space-y-6">
+          <div className="text-center space-y-2">
+            <p className="text-2xl font-medium text-muted-foreground">Your Score</p>
+            <p className={`text-7xl font-bold ${scoreColor}`}>{score.toFixed(0)}%</p>
+            <Progress value={score} className="w-full max-w-md mx-auto h-4 mt-2" />
+          </div>
+
+          {isLoadingAnalysis && (
+            <div className="text-center py-6">
+              <Lightbulb className="mx-auto h-8 w-8 animate-pulse text-primary mb-2" />
+              <p className="text-muted-foreground">AI is analyzing your performance...</p>
+            </div>
+          )}
+
+          {analysis && (
+            <Card className="bg-secondary/30">
+              <CardHeader>
+                <CardTitle className="text-2xl flex items-center"><Lightbulb className="mr-2 h-6 w-6 text-primary" /> AI Performance Analysis</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4 text-base">
+                <div>
+                  <h4 className="font-semibold text-primary">Strengths:</h4>
+                  <p>{analysis.strengths}</p>
+                </div>
+                <div>
+                  <h4 className="font-semibold text-destructive">Areas for Improvement:</h4>
+                  <p>{analysis.weaknesses}</p>
+                </div>
+                <div>
+                  <h4 className="font-semibold text-accent-foreground">Suggestions:</h4>
+                  <p>{analysis.suggestions}</p>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          <div>
+            <h3 className="text-2xl font-semibold mb-4 mt-8 text-center">Detailed Question Review</h3>
+            <Accordion type="single" collapsible className="w-full">
+              {questionsAttempted.map((attempt, index) => (
+                <AccordionItem value={`item-${index}`} key={index}>
+                  <AccordionTrigger className="text-lg hover:no-underline">
+                    <div className="flex items-center">
+                      {attempt.studentAnswerIndex === attempt.correctAnswerIndex ? (
+                        <CheckCircle2 className="h-6 w-6 mr-3 text-green-500 flex-shrink-0" />
+                      ) : (
+                        <XCircle className="h-6 w-6 mr-3 text-red-500 flex-shrink-0" />
+                      )}
+                      <span className="text-left">Question {index + 1}: {attempt.question.length > 50 ? attempt.question.substring(0,50) + "..." : attempt.question}</span>
+                    </div>
+                  </AccordionTrigger>
+                  <AccordionContent className="px-4 py-2 space-y-3 bg-slate-50 dark:bg-slate-800 rounded-b-md">
+                    <p className="text-base font-medium mb-2">{attempt.question}</p>
+                    <ul className="space-y-1 list-inside">
+                      {attempt.options.map((option, optIndex) => (
+                        <li key={optIndex} className={`flex items-start ${getOptionClass(index, optIndex)}`}>
+                          {optIndex === attempt.correctAnswerIndex && <CheckCircle2 className="h-5 w-5 mr-2 mt-0.5 text-green-500 flex-shrink-0" />}
+                          {optIndex === attempt.studentAnswerIndex && optIndex !== attempt.correctAnswerIndex && <XCircle className="h-5 w-5 mr-2 mt-0.5 text-red-500 flex-shrink-0" />}
+                          {! (optIndex === attempt.correctAnswerIndex || (optIndex === attempt.studentAnswerIndex && optIndex !== attempt.correctAnswerIndex)) && <div className="w-5 h-5 mr-2 mt-0.5 flex-shrink-0"></div> }
+                           <span>{String.fromCharCode(65 + optIndex)}. {option}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    {attempt.studentAnswerIndex !== attempt.correctAnswerIndex && attempt.studentAnswerIndex !== null && (
+                      <p className="text-sm text-muted-foreground">Your answer: <span className="font-semibold">{attempt.options[attempt.studentAnswerIndex!]}</span></p>
+                    )}
+                     {attempt.studentAnswerIndex === null && (
+                      <p className="text-sm text-yellow-600 font-semibold">You did not answer this question.</p>
+                    )}
+                    <p className="text-sm text-green-700">Correct answer: <span className="font-semibold">{attempt.options[attempt.correctAnswerIndex]}</span></p>
+                  </AccordionContent>
+                </AccordionItem>
+              ))}
+            </Accordion>
+          </div>
+        </CardContent>
+        <CardFooter className="p-6 flex justify-center">
+          <Link href="/">
+            <Button size="lg" variant="outline">
+              <Repeat className="mr-2 h-5 w-5" />
+              Create Another Quiz
+            </Button>
+          </Link>
+        </CardFooter>
+      </Card>
+    </div>
+  );
+}
