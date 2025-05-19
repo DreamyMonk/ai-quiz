@@ -33,88 +33,70 @@ export function QuizClient() {
   const [showPledgeModal, setShowPledgeModal] = useState(false);
 
   const router = useRouter();
-  const pathname = usePathname(); // Get current pathname
+  const pathname = usePathname(); 
   const { toast } = useToast();
 
   useEffect(() => {
-    console.log("QuizClient: Main useEffect triggered. Pathname:", pathname, "Current quizState:", quizState, "Current quizData ID:", quizData?.id);
+    console.log("QuizClient: Main useEffect triggered. Pathname:", pathname, "Current quizState:", quizState);
     const storedQuiz = localStorage.getItem('currentQuiz');
+
     if (storedQuiz) {
       try {
         const parsedQuiz: GeneratedQuizData = JSON.parse(storedQuiz);
-        console.log("QuizClient: Parsed quiz from localStorage. ID:", parsedQuiz.id);
+        console.log("QuizClient: Parsed quiz from localStorage. ID:", parsedQuiz.id, "Current component quizData.id:", quizData?.id);
+
         if (parsedQuiz && parsedQuiz.questions && parsedQuiz.questions.length > 0 && parsedQuiz.id) {
-          // Check if it's a new quiz or the same one, or if quizData is not yet set
+          // CRUCIAL: If quizData is not set OR the ID in localStorage is different from the current quizData.id,
+          // it's a new quiz (or a re-attempt). Reset everything for a fresh start.
           if (!quizData || quizData.id !== parsedQuiz.id) {
-            console.log(`QuizClient: Loading new quiz ID: ${parsedQuiz.id}. Previous quizData ID: ${quizData?.id}. Resetting states.`);
+            console.log(`QuizClient: New/different quiz ID (${parsedQuiz.id}) found in localStorage. Resetting all states for a fresh quiz.`);
             setQuizData(parsedQuiz);
             setSelectedAnswers(new Array(parsedQuiz.questions.length).fill(null));
             setCurrentQuestionIndex(0);
-            setQuizState('instructions'); // Crucial reset to instructions
-            setQuizDurationSeconds(parsedQuiz.durationMinutes > 0 ? parsedQuiz.durationMinutes * 60 : DEFAULT_QUIZ_DURATION_MINUTES * 60);
-            // Reset result-related states for a new quiz
             setScore(0);
             setAnalysis(null);
             setFinalAttemptData([]);
+            setQuizState('instructions'); // <<< THIS IS KEY: Always go back to instructions for a new quiz ID
+            setQuizDurationSeconds(parsedQuiz.durationMinutes > 0 ? parsedQuiz.durationMinutes * 60 : DEFAULT_QUIZ_DURATION_MINUTES * 60);
+            console.log("QuizClient: States fully reset. New quiz ID:", parsedQuiz.id, "Quiz state set to 'instructions'.");
           } else {
-            // Same quiz ID, implies a page refresh or returning to the tab.
-            // If quizState was 'results', it should remain 'results'.
-            // If quizState was 'loading' or 'instructions', and it's the same quiz, it's okay for it to stay 'instructions' or progress.
-            // If it was 'in_progress', this useEffect might re-trigger on refresh, but we don't want to reset to 'instructions' if progress exists.
-            // This 'else' branch might need more sophisticated handling if we want to resume mid-quiz after a refresh.
-            // For now, the critical part is that a NEW quiz ID correctly resets to 'instructions'.
-            console.log("QuizClient: Same quiz ID found or quizData already set. ID:", parsedQuiz.id, "Current quizState:", quizState);
-            if (quizState === 'loading') { // If initial load and quizData matches (e.g. refresh on exam page)
-                // Allow progression to instructions or potentially in_progress if we had resume logic
-                 setQuizState('instructions'); // Default to instructions if it was loading
+            // Same quiz ID found in localStorage as currently in component state.
+            // This usually means a page refresh or returning to the tab for an ongoing/completed quiz.
+            console.log("QuizClient: Same quiz ID found. Current quizState:", quizState);
+            if (quizState === 'loading') {
+              // If it was 'loading' (e.g., initial page load/refresh on exam page),
+              // and the data matches, allow it to proceed to 'instructions'
+              // or 'results' if results were already generated for this quizData.id
+               if (finalAttemptData.length > 0 && analysis && quizData.id === parsedQuiz.id) {
+                 console.log("QuizClient: Resuming to 'results' state for quiz ID:", parsedQuiz.id);
+                 setQuizState('results');
+               } else {
+                 console.log("QuizClient: Resuming to 'instructions' state for quiz ID:", parsedQuiz.id);
+                 setQuizState('instructions');
+               }
             }
-            // If quizState is already 'instructions', 'in_progress', or 'results' for the *same* quiz ID, let it be.
+            // If quizState is already 'instructions', 'in_progress', or 'results' for the *same* quiz ID,
+            // no state change is needed here from localStorage data alone.
           }
         } else {
           console.error("QuizClient: Invalid quiz data structure from localStorage.");
-          toast({ title: 'Error Loading Quiz', description: 'Invalid quiz data. Please generate a new quiz.', variant: 'destructive' });
-          router.push('/');
+          toast({ title: 'Error Loading Quiz', description: 'Invalid quiz data format. Please generate a new quiz.', variant: 'destructive' });
+          if (pathname === '/exam') router.push('/');
         }
       } catch (error) {
         console.error("QuizClient: Failed to parse quiz data from localStorage:", error);
-        toast({ title: 'Error Loading Quiz', description: 'Invalid quiz data. Please generate a new quiz.', variant: 'destructive' });
-        router.push('/');
+        toast({ title: 'Error Loading Quiz', description: 'Could not load quiz. Please generate a new quiz.', variant: 'destructive' });
+        if (pathname === '/exam') router.push('/');
       }
     } else {
-      console.log("QuizClient: No quiz found in localStorage.");
-      toast({ title: 'No Quiz Found', description: 'Please generate a quiz first.', variant: 'destructive' });
-      router.push('/');
-    }
-  }, [router, toast, pathname, quizData?.id]); // Added pathname and quizData.id to dependency array. quizData.id helps re-evaluate if external source changes it.
-
-
-  useEffect(() => {
-    const preventAction = (e: Event) => {
-      if (quizState === 'in_progress') {
-        e.preventDefault();
-        toast({
-          title: 'Action Disabled',
-          description: 'This action is disabled during the exam.',
-          variant: 'destructive',
-          duration: 3000,
-        });
+      // No quiz found in localStorage
+      console.log("QuizClient: No quiz found in localStorage. Current Pathname:", pathname);
+      if (pathname === '/exam') { // Only redirect if on the exam page and no quiz exists
+        toast({ title: 'No Quiz Found', description: 'Please generate a quiz first.', variant: 'destructive' });
+        router.push('/');
       }
-    };
-
-    if (quizState === 'in_progress') {
-      document.addEventListener('copy', preventAction);
-      document.addEventListener('cut', preventAction);
-      document.addEventListener('paste', preventAction);
-      document.addEventListener('contextmenu', preventAction);
     }
-
-    return () => {
-      document.removeEventListener('copy', preventAction);
-      document.removeEventListener('cut', preventAction);
-      document.removeEventListener('paste', preventAction);
-      document.removeEventListener('contextmenu', preventAction);
-    };
-  }, [quizState, toast]);
+  }, [pathname, quizData?.id, router, toast]); // Added router and toast as they are used in the effect.
 
 
   const openPledgeModal = () => {
@@ -231,7 +213,6 @@ export function QuizClient() {
                     <li>Answer each question to the best of your ability.</li>
                     <li>You can use the navigator to jump between questions.</li>
                     <li>A "Skip" button is available for each question.</li>
-                    <li>Actions like copy, paste, and right-click are disabled during the exam.</li>
                 </ul>
                  <Button 
                     variant="link" 
@@ -254,7 +235,7 @@ export function QuizClient() {
   if (quizData.questions.length === 0 && quizState !== 'loading') {
      return (
       <div className="flex flex-col items-center justify-center min-h-[calc(100vh-10rem)] text-center">
-        <XCircle className="h-16 w-16 text-destructive mb-4" /> {/* Changed icon */}
+        <XCircle className="h-16 w-16 text-destructive mb-4" />
         <h2 className="text-2xl font-semibold mb-2">No Questions Available</h2>
         <p className="text-muted-foreground mb-6">The AI couldn't generate questions for your request, or no questions were provided. Please try generating a new quiz.</p>
         <Button onClick={() => router.push('/')} size="lg">
@@ -317,7 +298,7 @@ export function QuizClient() {
             isSubmitting={quizState === 'submitting'}
           />
         )}
-        {quizState === 'submitting' && !currentQuestion && ( // Show loader if submitting and no current question (e.g. time up)
+        {quizState === 'submitting' && !currentQuestion && ( 
           <div className="flex flex-col items-center justify-center py-10">
               <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
               <p className="text-xl text-muted-foreground">Submitting your answers...</p>
@@ -360,3 +341,5 @@ export function QuizClient() {
     </div>
   );
 }
+
+    
