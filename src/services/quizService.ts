@@ -11,6 +11,22 @@ interface QuizDataToSave {
   createdAt: Timestamp;
 }
 
+function formatFirebaseError(error: any): string {
+  let message = error.message || 'Unknown Firestore error';
+  if (error.code === 'permission-denied') {
+    message = 'Missing or insufficient permissions. Please check your Firestore security rules in the Firebase console.';
+  } else if (error.code === 'unavailable') {
+    message = 'Firestore is currently unavailable. The service might be offline or experiencing issues.';
+  }
+  // You can add more specific error code handling here if needed
+  console.error("Detailed Firebase Error: ", {
+    code: error.code,
+    message: error.message,
+    fullError: JSON.stringify(error, Object.getOwnPropertyNames(error), 2) // Indent for readability
+  });
+  return message;
+}
+
 /**
  * Saves a new quiz to Firestore.
  * @param quizData The quiz data to save (topic, questions, duration).
@@ -32,10 +48,8 @@ export async function saveQuiz(quizData: Omit<GeneratedQuizData, 'id' | 'created
     return docRef.id;
   } catch (error: any) {
     console.error("Error saving quiz to Firestore: ", error);
-    console.error("Firebase error code:", error.code);
-    console.error("Firebase error message:", error.message);
-    console.error("Full error object:", JSON.stringify(error, Object.getOwnPropertyNames(error)));
-    throw new Error(`Failed to save quiz: ${error.message || 'Unknown Firestore error'}`);
+    const formattedError = formatFirebaseError(error);
+    throw new Error(`Failed to save quiz: ${formattedError}`);
   }
 }
 
@@ -55,23 +69,26 @@ export async function getQuizById(quizId: string): Promise<GeneratedQuizData | n
     const docSnap = await getDoc(docRef);
 
     if (docSnap.exists()) {
-      const data = docSnap.data() as QuizDataToSave;
-      console.log("Quiz fetched successfully from Firestore. ID:", docSnap.id);
+      const data = docSnap.data() as QuizDataToSave; // Ensure data is cast to the correct type
+      console.log("Quiz fetched successfully from Firestore. ID:", docSnap.id, "Data:", data);
+      if (!data.questions || !data.topic || typeof data.durationMinutes === 'undefined') {
+        console.error("Firestore data for quiz", quizId, "is missing essential fields:", data);
+        throw new Error("Fetched quiz data is incomplete or malformed.");
+      }
       return {
         id: docSnap.id,
         topic: data.topic,
         questions: data.questions,
         durationMinutes: data.durationMinutes,
-      } as GeneratedQuizData;
+        // Note: createdAt is not directly used by QuizClient but is good to have if you were listing quizzes
+      } as GeneratedQuizData; // Explicitly cast to GeneratedQuizData
     } else {
       console.warn("No such quiz document in Firestore! ID:", quizId);
       return null;
     }
   } catch (error: any) {
     console.error("Error fetching quiz from Firestore: ", error);
-    console.error("Firebase error code:", error.code);
-    console.error("Firebase error message:", error.message);
-    console.error("Full error object:", JSON.stringify(error, Object.getOwnPropertyNames(error)));
-    throw new Error(`Failed to fetch quiz: ${error.message || 'Unknown Firestore error'}`);
+    const formattedError = formatFirebaseError(error);
+    throw new Error(`Failed to fetch quiz: ${formattedError}`);
   }
 }
