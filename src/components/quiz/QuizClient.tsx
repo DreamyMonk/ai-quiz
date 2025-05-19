@@ -132,13 +132,13 @@ export function QuizClient() {
     return active;
   }, [hasMicPermission]);
 
-  const requestCameraMicPermissions = async () => {
+ const requestCameraMicPermissions = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
       cameraStreamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        videoRef.current.onloadedmetadata = () => { // Use onloadedmetadata
+        videoRef.current.onloadedmetadata = () => {
             if (videoRef.current) {
                 videoRef.current.play().catch(err => {
                     console.error('Error playing video via onloadedmetadata:', err);
@@ -171,13 +171,24 @@ export function QuizClient() {
 
   // Effect to ensure video plays when in exam and permissions are granted
   useEffect(() => {
-    if (quizState === 'in_progress' && hasCameraPermission && videoRef.current && videoRef.current.srcObject && videoRef.current.paused) {
-      console.log("Attempting to play video preview during in_progress state.");
-      videoRef.current.play().catch(err => {
-        console.error('Error playing video preview during in_progress state:', err);
-      });
+    if (quizState === 'in_progress' && hasCameraPermission && videoRef.current && cameraStreamRef.current) {
+      console.log("QuizClient: 'in_progress' useEffect for video playback triggered.");
+      // Ensure srcObject is correctly assigned, especially if the video element was re-rendered
+      if (videoRef.current.srcObject !== cameraStreamRef.current) {
+        console.log("QuizClient: Re-assigning srcObject to video element for in_progress state.");
+        videoRef.current.srcObject = cameraStreamRef.current;
+      }
+
+      if (videoRef.current.paused) {
+        console.log("QuizClient: Attempting to play video preview during in_progress state because it's paused.");
+        videoRef.current.play().catch(err => {
+          console.error('QuizClient: Error playing video preview during in_progress state:', err);
+        });
+      } else {
+        console.log("QuizClient: Video already playing or no need to play during in_progress state.");
+      }
     }
-  }, [quizState, hasCameraPermission, videoRef]);
+  }, [quizState, hasCameraPermission]);
 
 
   const requestScreenSharePermission = async () => {
@@ -188,7 +199,7 @@ export function QuizClient() {
       });
       
       const videoTrack = stream.getVideoTracks()[0];
-      if (!videoTrack) { // Check if track exists
+      if (!videoTrack) {
         stream.getTracks().forEach(track => track.stop());
         screenStreamRef.current = null;
         setHasScreenPermission(false);
@@ -498,6 +509,12 @@ export function QuizClient() {
 
   useEffect(() => {
     if (quizState === 'in_progress' && !isExamPausedByProctoring && hasCameraPermission && hasMicPermission && !showFullScreenWarningModal && !humanPresenceIssue) {
+      // Ensure video is playing when analysis interval starts
+      if (videoRef.current && videoRef.current.srcObject && videoRef.current.paused) {
+        console.log("CameraAnalysisInterval: Attempting to play video for analysis.");
+        videoRef.current.play().catch(err => console.warn("CameraAnalysisInterval: Error playing video:", err));
+      }
+      
       if (cameraAnalysisIntervalRef.current) clearInterval(cameraAnalysisIntervalRef.current);
       cameraAnalysisIntervalRef.current = setInterval(() => {
         captureAndAnalyzeFrame();
@@ -639,10 +656,10 @@ export function QuizClient() {
   const videoElement = (
     <video 
         ref={videoRef} 
-        className={`bg-muted rounded-md transition-all duration-300 ease-in-out w-full h-full object-cover block`} 
+        className="bg-muted rounded-md transition-all duration-300 ease-in-out w-full h-full object-cover block"
         autoPlay 
         muted 
-        playsInline 
+        playsInline // Important for iOS and some modern browsers for autoplay
     />
   );
 
@@ -882,5 +899,3 @@ export function QuizClient() {
     </div>
   );
 }
-
-    
