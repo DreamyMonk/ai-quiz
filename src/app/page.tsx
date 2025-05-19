@@ -26,14 +26,13 @@ const aiGeneratedQuizSchema = z.object({
   quizDuration: z.coerce.number().int().min(1, "Minimum 1 minute.").max(120, "Maximum 120 minutes."),
 });
 
-// Updated customQuizSchema to use a single textarea for all prompts
 const customQuizSchema = z.object({
   customQuizTitle: z.string().min(3, "Quiz title must be at least 3 characters.").max(100, "Quiz title too long."),
   customPromptsBlock: z.string()
     .min(5, { message: "Please provide at least one question, topic, or prompt (min 5 characters for the entire block)." })
-    .max(15000, { message: "The total text for custom questions is too long (max 15000 characters)." })
+    .max(30000, { message: "The total text for custom questions is too long (max 30000 characters)." }) // Increased length
     .refine(value => value.trim().split('\n').filter(line => line.trim() !== '').length > 0, { message: "Please add at least one question or prompt."})
-    .refine(value => value.trim().split('\n').filter(line => line.trim() !== '').length <= 20, { message: "You can add a maximum of 20 questions/prompts (each on a new line)."}),
+    .refine(value => value.trim().split('\n').filter(line => line.trim() !== '').length <= 200, { message: "You can add a maximum of 100 questions/prompts or fully formatted MCQs (each on a new line or in blocks)."}), // Increased limit to 100 questions (200 lines approx)
   customQuizDuration: z.coerce.number().int().min(1, "Minimum 1 minute.").max(180, "Maximum 180 minutes."),
 });
 
@@ -57,13 +56,74 @@ const defaultValues: QuizSettingsFormValues = {
 
 // Fisher-Yates shuffle function
 function shuffleArray<T>(array: T[]): T[] {
-  const newArray = [...array]; // Create a copy to avoid mutating the original
+  const newArray = [...array];
   for (let i = newArray.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [newArray[i], newArray[j]] = [newArray[j], newArray[i]];
   }
   return newArray;
 }
+
+// Helper function to parse fully formatted MCQ blocks
+function parseFullMcqBlock(lines: string[]): McqQuestion | null {
+  if (lines.length < 3) return null; // Min: Question, 1 Option, Answer. Realistically 6.
+
+  const questionNumberRegex = /^\s*\d+[.)]\s*/;
+  const optionLabelRegex = /^\s*[A-D][.)]\s+/i;
+  const answerLineRegex = /^\s*Answer:\s*([A-D])\s*(?:\((.*?)\))?\s*$/i;
+
+  let questionText = "";
+  const options: string[] = [];
+  let correctAnswerLetter: string | null = null;
+  let potentialQuestionLine = lines[0].replace(questionNumberRegex, "").trim();
+
+  if (!potentialQuestionLine) return null;
+  questionText = potentialQuestionLine;
+
+  let lineIndex = 1;
+  // Parse options
+  while(lineIndex < lines.length && options.length < 4) {
+    const currentLine = lines[lineIndex].trim();
+    if (optionLabelRegex.test(currentLine)) {
+      options.push(currentLine.replace(optionLabelRegex, "").trim());
+    } else if (answerLineRegex.test(currentLine) || questionNumberRegex.test(currentLine)) {
+      // If we hit an answer line or new question before 4 options, it's not a valid block for this parser
+      break; 
+    } else if (options.length > 0) {
+      // Likely a multi-line option, append to the last option
+      options[options.length -1] += `\n${currentLine}`;
+    } else {
+      // This line is not an option and we haven't started options yet, so it could be a multi-line question
+      questionText += `\n${currentLine}`;
+    }
+    lineIndex++;
+  }
+
+  // Check for answer line after options (or after multi-line question if no options were found)
+  while(lineIndex < lines.length) {
+    const currentLine = lines[lineIndex].trim();
+    const answerMatch = currentLine.match(answerLineRegex);
+    if (answerMatch && answerMatch[1]) {
+        correctAnswerLetter = answerMatch[1].toUpperCase();
+        break;
+    }
+    lineIndex++;
+  }
+  
+  if (options.length !== 4 || !correctAnswerLetter) {
+    return null;
+  }
+
+  const correctAnswerIndex = "ABCD".indexOf(correctAnswerLetter);
+  if (correctAnswerIndex === -1) return null;
+
+  return {
+    question: questionText,
+    options: options,
+    correctAnswerIndex: correctAnswerIndex,
+  };
+}
+
 
 export default function HomePage() {
   const [isLoading, setIsLoading] = useState(false);
@@ -120,84 +180,144 @@ export default function HomePage() {
           description: 'AI is working on your questions. This might take a moment.',
         });
 
-        let processedQuestions: McqQuestion[] = [];
-        const ansPattern = /^(?<questionText>.+?)\s*\(ans\)(?<correctAnswerText>.+?)\(ans\)\s*$/i;
+        const processedQuestions: McqQuestion[] = [];
+        const allLines = data.customPromptsBlock.trim().split('\n').filter(line => line.trim() !== '');
+        
+        const questionBlocks: string[][] = [];
+        let currentBlock: string[] = [];
 
-        const promptsArray = data.customPromptsBlock.trim().split('\n').filter(line => line.trim() !== '');
+        const questionStartRegex = /^\s*\d+[.)]\s+/;
 
-        for (const promptText of promptsArray) {
-          const trimmedPrompt = promptText.trim();
-          const match = trimmedPrompt.match(ansPattern);
-
-          try {
-            if (match && match.groups && match.groups.questionText.trim() && match.groups.correctAnswerText.trim()) {
-              const questionText = match.groups.questionText.trim();
-              const correctAnswerText = match.groups.correctAnswerText.trim();
-              
-              const optionsResult: GenerateOptionsForCustomQuestionOutput = await generateOptionsForCustomQuestion({
-                questionText: questionText,
-                correctAnswerText: correctAnswerText,
-              });
-              processedQuestions.push({
-                question: questionText,
-                options: optionsResult.options,
-                correctAnswerIndex: optionsResult.correctAnswerIndex,
-              });
+        for (const line of allLines) {
+            if (questionStartRegex.test(line) && currentBlock.length > 0) {
+                questionBlocks.push([...currentBlock]);
+                currentBlock = [line];
             } else {
-              const singleMcqResult: GenerateSingleMcqFromUserQueryOutput = await generateSingleMcqFromUserQuery({
-                userQuery: trimmedPrompt,
-              });
-              if (singleMcqResult && singleMcqResult.question) {
-                processedQuestions.push({
-                  question: singleMcqResult.question,
-                  options: singleMcqResult.options,
-                  correctAnswerIndex: singleMcqResult.correctAnswerIndex,
-                });
-              } else {
-                 throw new Error('AI failed to generate a question from the prompt.');
-              }
+                currentBlock.push(line);
             }
-          } catch (err) {
-            console.error("Error processing custom prompt:", trimmedPrompt, err);
+        }
+        if (currentBlock.length > 0) {
+            questionBlocks.push([...currentBlock]);
+        }
+
+        const processingPromises = questionBlocks.map(async (block) => {
+          const fullMcq = parseFullMcqBlock(block);
+          if (fullMcq) {
+            return fullMcq;
+          } else {
+            // If not a full MCQ block, process the first line (or entire block if short) with AI
+            // For simplicity here, we'll process each line of a "failed" block individually
+            // A more sophisticated approach might treat the whole failed block as one complex prompt
+            const singleLinePromises = block.map(async (lineContent) => {
+              const trimmedPrompt = lineContent.trim();
+              if (!trimmedPrompt) return null;
+
+              const ansPattern = /^(?<questionText>.+?)\s*\(ans\)(?<correctAnswerText>.+?)\(ans\)\s*$/i;
+              const match = trimmedPrompt.match(ansPattern);
+
+              if (match && match.groups && match.groups.questionText.trim() && match.groups.correctAnswerText.trim()) {
+                const questionText = match.groups.questionText.trim();
+                const correctAnswerText = match.groups.correctAnswerText.trim();
+                const optionsResult: GenerateOptionsForCustomQuestionOutput = await generateOptionsForCustomQuestion({
+                  questionText: questionText,
+                  correctAnswerText: correctAnswerText,
+                });
+                return {
+                  question: questionText,
+                  options: optionsResult.options,
+                  correctAnswerIndex: optionsResult.correctAnswerIndex,
+                };
+              } else {
+                const singleMcqResult: GenerateSingleMcqFromUserQueryOutput = await generateSingleMcqFromUserQuery({
+                  userQuery: trimmedPrompt,
+                });
+                if (singleMcqResult && singleMcqResult.question) {
+                  return {
+                    question: singleMcqResult.question,
+                    options: singleMcqResult.options,
+                    correctAnswerIndex: singleMcqResult.correctAnswerIndex,
+                  };
+                } else {
+                  throw new Error(`AI failed to generate a question from the prompt: "${trimmedPrompt.substring(0,30)}..."`);
+                }
+              }
+            });
+            // This will return an array of promises for the lines within this block
+            return Promise.allSettled(singleLinePromises);
+          }
+        });
+
+        const results = await Promise.allSettled(processingPromises);
+        let anyErrors = false;
+
+        results.forEach((result, blockIndex) => {
+          if (result.status === 'fulfilled') {
+            if (Array.isArray(result.value)) { // Array of settled promises for single lines
+              result.value.forEach(lineResult => {
+                if (lineResult.status === 'fulfilled' && lineResult.value) {
+                  processedQuestions.push(lineResult.value);
+                } else if (lineResult.status === 'rejected') {
+                  anyErrors = true;
+                  console.error(`Error processing line in block ${blockIndex + 1}:`, lineResult.reason);
+                  toast({
+                    title: `Error processing a line`,
+                    description: `AI failed to process a line: ${(lineResult.reason as Error).message}. Please review inputs.`,
+                    variant: 'destructive',
+                  });
+                }
+              });
+            } else if (result.value) { // A single successfully parsed full MCQ
+              processedQuestions.push(result.value);
+            }
+          } else { // Top-level promise for a block failed (shouldn't happen with current setup unless parseFullMcqBlock throws)
+            anyErrors = true;
+            console.error("Error processing custom prompt block:", questionBlocks[blockIndex].join('\n'), result.reason);
             toast({
-              title: `Error with prompt: "${trimmedPrompt.substring(0, 30)}..."`,
-              description: `AI failed to process this prompt. ${(err as Error).message}. Please review it or try again.`,
+              title: `Error with prompt block starting: "${questionBlocks[blockIndex][0].substring(0, 30)}..."`,
+              description: `AI failed to process this block. ${(result.reason as Error).message}. Please review it or try again.`,
               variant: 'destructive',
             });
-            setIsLoading(false);
-            return; 
           }
+        });
+
+        if (anyErrors && processedQuestions.length === 0) {
+             toast({
+                title: 'Custom Quiz Processing Failed',
+                description: 'Could not process any of your custom questions. Please check your input and try again.',
+                variant: 'destructive',
+            });
+            setIsLoading(false);
+            return;
+        }
+        if (processedQuestions.length === 0 && allLines.length > 0) {
+             toast({
+                title: 'No Questions Processed',
+                description: 'None of the provided custom prompts resulted in a valid question. Please check your input format.',
+                variant: 'destructive',
+            });
+            setIsLoading(false);
+            return;
         }
 
-        // Shuffle the processed questions
-        if (processedQuestions.length > 1) {
-          processedQuestions = shuffleArray(processedQuestions);
-        }
 
-        if (processedQuestions.length === promptsArray.length && promptsArray.length > 0) {
+        if (processedQuestions.length > 0) {
+          const finalQuestions = shuffleArray(processedQuestions);
           const quizData: GeneratedQuizData = {
             id: new Date().toISOString(),
             topic: data.customQuizTitle,
-            questions: processedQuestions, // Use shuffled questions
+            questions: finalQuestions,
             durationMinutes: data.customQuizDuration,
           };
           localStorage.setItem('currentQuiz', JSON.stringify(quizData));
           toast({
             title: 'Custom Quiz Ready!',
-            description: `Your quiz "${data.customQuizTitle}" with ${processedQuestions.length} questions is ready. Redirecting...`,
+            description: `Your quiz "${data.customQuizTitle}" with ${finalQuestions.length} questions is ready. Redirecting...`,
           });
           router.push('/exam');
-        } else if (promptsArray.length === 0) {
+        } else if (allLines.length === 0) {
            toast({
             title: 'No Prompts Provided',
             description: 'Please enter at least one question or topic for your custom quiz.',
-            variant: 'destructive',
-          });
-        }
-        else {
-          toast({
-            title: 'Error Processing Custom Quiz',
-            description: 'Could not process all custom question prompts. Please check inputs.',
             variant: 'destructive',
           });
         }
@@ -225,7 +345,7 @@ export default function HomePage() {
           <CardDescription className="text-lg text-muted-foreground pt-2">
             {quizMode === 'ai' 
               ? "Let AI craft a quiz for you, or switch to custom mode to build your own!"
-              : "Build your own quiz. Paste questions/topics below (one per line). AI will fill in the blanks!"}
+              : "Build your own quiz. Paste questions/topics below (one per line or in blocks). AI can help!"}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -360,21 +480,38 @@ export default function HomePage() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel className="text-base">Your Questions & Prompts</FormLabel>
-                         <FormDescription className="text-sm text-muted-foreground mb-2">
-                          Enter each question or topic on a new line (max 20).
+                         <FormDescription className="text-sm text-muted-foreground mb-2 space-y-1">
+                          <div>Enter each question/prompt on a new line, or paste blocks of fully formatted MCQs (max 100 questions).</div>
                           <ul className="list-disc list-inside pl-4 mt-1">
-                            <li>To let AI generate a full MCQ: type a topic (e.g., <code className="bg-muted px-1 rounded-sm">Ancient Rome</code>) or a question (e.g., <code className="bg-muted px-1 rounded-sm">What is the speed of light?</code>).</li>
-                            <li>To specify an answer: use the format <code className="bg-muted px-1 rounded-sm">Question Text (ans)Correct Answer(ans)</code>. <br/>
-                              Example: <code className="bg-muted px-1 rounded-sm">The Earth revolves around the (ans)Sun(ans)</code>
+                            <li>
+                              <strong>Fully Formatted MCQ:</strong> Paste a question, its options (A, B, C, D), and an "Answer: X" line.
+                              <div className="pl-4 my-1 p-2 bg-muted/50 rounded-md text-xs">
+                                <code className="block">1. What is 2+2?</code>
+                                <code className="block">A) 3</code>
+                                <code className="block">B) 4</code>
+                                <code className="block">C) 5</code>
+                                <code className="block">D) 6</code>
+                                <code className="block">Answer: B</code>
+                              </div>
                             </li>
+                            <li><strong>AI Generates Options:</strong> Provide question and answer like: <code className="bg-muted px-1 rounded-sm">The Earth revolves around the (ans)Sun(ans)</code>. AI creates other options.</li>
+                            <li><strong>AI Generates Full MCQ:</strong> Type a topic (e.g., <code className="bg-muted px-1 rounded-sm">Ancient Rome</code>) or a question (e.g., <code className="bg-muted px-1 rounded-sm">What is the speed of light?</code>). AI creates the full question and options.</li>
                           </ul>
+                           Separate distinct questions/prompts with an empty line if pasting multiple fully formatted MCQs for clearer parsing.
                         </FormDescription>
                         <FormControl>
                           <Textarea
-                            placeholder="What is 2+2? (ans)4(ans)
-Carbon Dioxide
+                            placeholder="1. What is 2+2?
+A) 3
+B) 4
+C) 5
+D) 6
+Answer: B
+
+What is the chemical symbol for Carbon? (ans)C(ans)
+
 The French Revolution
-..."
+... (up to 100 entries)"
                             className="resize-y min-h-[200px] md:min-h-[250px] text-base"
                             {...field}
                             disabled={isLoading}
@@ -424,3 +561,5 @@ The French Revolution
     </div>
   );
 }
+
+    
