@@ -3,6 +3,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+import Script from 'next/script';
 import type { GeneratedQuizData, McqQuestion, QuestionAttempt, StudentAnswers } from '@/types/quiz';
 import { useToast } from '@/hooks/use-toast';
 import { analyzeQuizPerformance, type AnalyzeQuizPerformanceInput, type AnalyzeQuizPerformanceOutput } from '@/ai/flows/analyze-quiz-performance';
@@ -12,12 +13,21 @@ import { TimerDisplay } from './TimerDisplay';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { FullScreenWarningModal } from './FullScreenWarningModal';
-import { AlertTriangle, Loader2, BookOpenCheck, Camera, Mic, ScreenShare, CopyWarning, XCircle, Maximize } from 'lucide-react';
+import { AlertTriangle, Loader2, BookOpenCheck, Camera, Mic, ScreenShare, XCircle, Maximize, ShieldCheck } from 'lucide-react';
+
+// Global declaration for Testwith API object
+declare global {
+  interface Window {
+    Testwith: new (serviceId: string) => any; // Adjust 'any' if more specific type is known
+  }
+}
 
 const DEFAULT_QUIZ_DURATION_MINUTES = 15;
 const FULLSCREEN_RETURN_TIMEOUT_SECONDS = 30; // Time to return to fullscreen
+
+// IMPORTANT: Replace with your actual serviceId from Testwith
+const TESTWITH_SERVICE_ID = "YOUR_TESTWITH_SERVICE_ID_HERE"; 
 
 export function QuizClient() {
   const [quizData, setQuizData] = useState<GeneratedQuizData | null>(null);
@@ -39,6 +49,12 @@ export function QuizClient() {
   const [showFullScreenWarningModal, setShowFullScreenWarningModal] = useState(false);
   const [fullScreenReturnCountdown, setFullScreenReturnCountdown] = useState(FULLSCREEN_RETURN_TIMEOUT_SECONDS);
 
+  // Testwith API states
+  const [testwithScriptLoaded, setTestwithScriptLoaded] = useState(false);
+  const [testwithApiReady, setTestwithApiReady] = useState(false);
+  const [isLoadingTestwith, setIsLoadingTestwith] = useState(false);
+  const testwithInstanceRef = useRef<any | null>(null);
+
   const videoRef = useRef<HTMLVideoElement>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
@@ -56,7 +72,7 @@ export function QuizClient() {
         if (parsedQuiz && parsedQuiz.questions && parsedQuiz.questions.length > 0) {
           setQuizData(parsedQuiz);
           setSelectedAnswers(new Array(parsedQuiz.questions.length).fill(null));
-          setQuizState('permission_setup'); // Start with permission setup
+          setQuizState('permission_setup'); 
           setQuizDurationSeconds(parsedQuiz.durationMinutes > 0 ? parsedQuiz.durationMinutes * 60 : DEFAULT_QUIZ_DURATION_MINUTES * 60);
         } else {
           throw new Error("Invalid quiz data structure or no questions.");
@@ -71,6 +87,43 @@ export function QuizClient() {
       router.push('/');
     }
   }, [router, toast]);
+
+  // Initialize Testwith API after script is loaded
+  useEffect(() => {
+    if (testwithScriptLoaded && typeof window.Testwith !== 'undefined') {
+      if (TESTWITH_SERVICE_ID === "YOUR_TESTWITH_SERVICE_ID_HERE") {
+        toast({
+          title: "Testwith API Configuration Needed",
+          description: "Please replace YOUR_TESTWITH_SERVICE_ID_HERE in QuizClient.tsx with your actual service ID.",
+          variant: "destructive",
+          duration: 10000,
+        });
+        // Potentially block further progress or allow with a warning
+        // For now, we'll let it try to load but it will likely fail or not function correctly.
+      }
+      
+      setIsLoadingTestwith(true);
+      try {
+        const tw = new window.Testwith(TESTWITH_SERVICE_ID);
+        testwithInstanceRef.current = tw;
+        tw.loadTestwith().then(() => {
+          setTestwithApiReady(true);
+          setIsLoadingTestwith(false);
+          toast({ title: 'Testwith AI Proctoring Ready', description: 'AI supervision service initialized.', variant: 'default' });
+        }).catch((err: any) => {
+          console.error('Error Occurred While Loading Testwith Resources:', err);
+          toast({ title: 'Testwith API Error', description: 'Could not load AI proctoring resources. Please try again or contact support.', variant: 'destructive' });
+          setIsLoadingTestwith(false);
+          setTestwithApiReady(false); // Explicitly set to false on error
+        });
+      } catch (error) {
+        console.error('Error initializing Testwith object:', error);
+        toast({ title: 'Testwith API Init Error', description: 'Failed to create Testwith object.', variant: 'destructive' });
+        setIsLoadingTestwith(false);
+         setTestwithApiReady(false);
+      }
+    }
+  }, [testwithScriptLoaded, toast]);
 
 
   const requestCameraMicPermissions = async () => {
@@ -96,8 +149,6 @@ export function QuizClient() {
     try {
       const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
       screenStreamRef.current = stream;
-      // Optional: display screen share preview
-      // if (screenRef.current) screenRef.current.srcObject = stream;
       setHasScreenPermission(true);
       return true;
     } catch (error) {
@@ -114,27 +165,33 @@ export function QuizClient() {
         toast({ title: "Fullscreen Error", description: `Could not enter fullscreen: ${err.message}. Please try again.`, variant: "destructive"});
       });
     }
-    // Check if fullscreen is active after attempting
      setTimeout(() => setIsFullScreen(!!document.fullscreenElement), 100);
   }, [toast]);
 
   const startExamFlow = useCallback(() => {
-    if (hasCameraPermission && hasMicPermission && hasScreenPermission) {
+    if (hasCameraPermission && hasMicPermission && hasScreenPermission && testwithApiReady) {
       setQuizState('instructions');
     } else {
-       setQuizState('permission_setup'); // Go back if permissions are not met
-       toast({title: "Permissions Required", description: "All permissions (Camera, Mic, Screen Share) must be granted to start the exam.", variant: "destructive"});
+       setQuizState('permission_setup'); 
+       let missingItems = [];
+       if (!hasCameraPermission) missingItems.push("Camera");
+       if (!hasMicPermission) missingItems.push("Microphone");
+       if (!hasScreenPermission) missingItems.push("Screen Share");
+       if (!testwithApiReady) missingItems.push("AI Proctoring Service");
+       
+       toast({title: "Setup Incomplete", description: `Please grant all permissions and ensure AI proctoring is ready. Missing: ${missingItems.join(', ')}.`, variant: "destructive"});
     }
-  }, [hasCameraPermission, hasMicPermission, hasScreenPermission, toast]);
+  }, [hasCameraPermission, hasMicPermission, hasScreenPermission, testwithApiReady, toast]);
 
 
   const beginExam = () => {
     enterFullScreen();
     setQuizState('in_progress');
+    // Here you might call Testwith API methods to start an exam session if applicable
+    // e.g., testwithInstanceRef.current?.startExamMonitoring(examineeId, examVenueId);
   };
 
 
-  // Event Listeners for Proctoring
   useEffect(() => {
     if (quizState !== 'in_progress' && quizState !== 'submitting' && quizState !== 'results') return;
 
@@ -145,12 +202,11 @@ export function QuizClient() {
         setShowFullScreenWarningModal(true);
         setIsExamPausedByProctoring(true);
         if (proctoringReturnTimerRef.current) clearTimeout(proctoringReturnTimerRef.current);
-        setFullScreenReturnCountdown(FULLSCREEN_RETURN_TIMEOUT_SECONDS); // Reset countdown
+        setFullScreenReturnCountdown(FULLSCREEN_RETURN_TIMEOUT_SECONDS); 
         proctoringReturnTimerRef.current = setInterval(() => {
             setFullScreenReturnCountdown(prev => {
                 if (prev <= 1) {
                     if(proctoringReturnTimerRef.current) clearInterval(proctoringReturnTimerRef.current);
-                    // Optionally auto-submit or just keep modal open
                     toast({title: "Fullscreen Timeout", description: "Please return to fullscreen or end the exam.", variant: "destructive"});
                     return 0;
                 }
@@ -169,10 +225,6 @@ export function QuizClient() {
       if (document.visibilityState === 'hidden' && quizState === 'in_progress' && isFullScreen) {
         toast({ title: 'Tab Switch Detected', description: 'Switching tabs is not allowed. The exam is paused.', variant: 'destructive' });
         setIsExamPausedByProctoring(true);
-        // Potentially show a different modal or add to fullscreen warning logic
-      } else if (document.visibilityState === 'visible' && isFullScreen) {
-        // Check if it was paused due to tab switch specifically if you differentiate
-        // setIsExamPausedByProctoring(false); // Only if fullscreen is also active
       }
     };
 
@@ -192,6 +244,8 @@ export function QuizClient() {
       if (quizState === 'in_progress') {
         e.preventDefault();
         e.returnValue = 'Are you sure you want to leave? Your progress might be lost and the exam will be submitted.';
+        // Potentially call submitQuiz("Abandoned exam by closing tab/window") here
+        // Or a Testwith API call to flag abandonment.
         return e.returnValue;
       }
     };
@@ -217,44 +271,53 @@ export function QuizClient() {
   }, [quizState, toast, isFullScreen]);
 
 
-  // Snapshot functions (conceptual)
   const captureFrame = (stream: MediaStream | null, sourceName: string) => {
     if (!stream) {
-      console.warn(`No stream available for ${sourceName}`);
+      // console.warn(`No stream available for ${sourceName}`); // Reduce console noise
       return;
     }
     const videoTrack = stream.getVideoTracks()[0];
     if (!videoTrack) {
-      console.warn(`No video track for ${sourceName}`);
+      // console.warn(`No video track for ${sourceName}`);
       return;
     }
 
-    const imageCapture = new (window as any).ImageCapture(videoTrack); // ImageCapture might not be fully typed
-    imageCapture.grabFrame()
-      .then((imageBitmap: ImageBitmap) => {
-        const canvas = document.createElement('canvas');
-        canvas.width = imageBitmap.width;
-        canvas.height = imageBitmap.height;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.drawImage(imageBitmap, 0, 0);
-          const dataUri = canvas.toDataURL('image/png');
-          console.log(`${sourceName} Snapshot (Data URI):`, dataUri.substring(0,100) + "..."); // Log for PoC
-          // Here, you would send this dataUri to your backend/AI for analysis if you had that capability.
-          // toast({ title: `${sourceName} Snapshot Taken`, description: "Image captured (logged to console)." });
-        }
-      })
-      .catch((error: any) => console.error(`Error capturing ${sourceName} frame:`, error));
+    // Check if ImageCapture is available
+    if (typeof (window as any).ImageCapture === 'undefined') {
+        console.warn('ImageCapture API not supported in this browser.');
+        return;
+    }
+
+    try {
+        const imageCapture = new (window as any).ImageCapture(videoTrack); 
+        imageCapture.grabFrame()
+        .then((imageBitmap: ImageBitmap) => {
+            const canvas = document.createElement('canvas');
+            canvas.width = imageBitmap.width;
+            canvas.height = imageBitmap.height;
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+            ctx.drawImage(imageBitmap, 0, 0);
+            const dataUri = canvas.toDataURL('image/png');
+            console.log(`${sourceName} Snapshot (Data URI Preview):`, dataUri.substring(0,100) + "..."); 
+            // With Testwith API, you'd likely send this via their methods or they'd handle streaming.
+            }
+            imageBitmap.close(); // Release the ImageBitmap resource
+        })
+        .catch((error: any) => console.error(`Error capturing ${sourceName} frame:`, error));
+    } catch(e) {
+        console.error(`Error creating ImageCapture for ${sourceName}:`, e);
+    }
   };
 
-  // Example: Capture frames periodically or on event
+
   useEffect(() => {
     let intervalId: NodeJS.Timeout;
     if (quizState === 'in_progress' && !isExamPausedByProctoring && hasCameraPermission && hasScreenPermission) {
       // intervalId = setInterval(() => {
       //   captureFrame(cameraStreamRef.current, 'Camera');
       //   captureFrame(screenStreamRef.current, 'Screen');
-      // }, 30000); // e.g., every 30 seconds
+      // }, 30000); 
     }
     return () => {
       if (intervalId) clearInterval(intervalId);
@@ -280,16 +343,17 @@ export function QuizClient() {
 
   const submitQuiz = useCallback(async (reason?: string) => {
     if (!quizData) return;
-    if (quizState === 'submitting' || quizState === 'results') return; // Prevent multiple submissions
+    if (quizState === 'submitting' || quizState === 'results') return;
 
     setQuizState('submitting');
     toast({ title: 'Submitting Quiz...', description: reason || 'Calculating your score and analyzing performance.' });
 
-    // Stop media streams
     cameraStreamRef.current?.getTracks().forEach(track => track.stop());
     screenStreamRef.current?.getTracks().forEach(track => track.stop());
     if (videoRef.current) videoRef.current.srcObject = null;
 
+    // Testwith: Notify end of exam session if applicable
+    // testwithInstanceRef.current?.endExamMonitoring();
 
     let correctAnswers = 0;
     const attemptedQuestions: QuestionAttempt[] = quizData.questions.map((q, index) => {
@@ -325,7 +389,6 @@ export function QuizClient() {
       setIsLoadingAnalysis(false);
       setQuizState('results');
       toast({ title: 'Quiz Submitted!', description: `Your score is ${calculatedScore.toFixed(0)}%.` });
-      // Exit fullscreen if still in it
       if (document.fullscreenElement) {
         document.exitFullscreen();
       }
@@ -334,7 +397,6 @@ export function QuizClient() {
 
   const handleReturnToFullScreen = () => {
     enterFullScreen();
-    // Check if fullscreen is active after attempting
     setTimeout(() => {
         if (document.fullscreenElement) {
             setShowFullScreenWarningModal(false);
@@ -344,7 +406,7 @@ export function QuizClient() {
         } else {
             toast({title: "Failed to Re-enter Fullscreen", description: "Please try enabling fullscreen manually.", variant: "warning"});
         }
-    }, 200); // Small delay to allow fullscreen API to respond
+    }, 200); 
   };
 
   const handleEndExamFromModal = () => {
@@ -352,7 +414,6 @@ export function QuizClient() {
     submitQuiz("Exam ended due to not returning to fullscreen.");
   };
 
-  // Render Logic based on quizState
   if (quizState === 'loading' || !quizData) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[calc(100vh-10rem)]">
@@ -364,33 +425,75 @@ export function QuizClient() {
 
   if (quizState === 'permission_setup') {
     return (
-      <Card className="w-full max-w-lg mx-auto my-8 shadow-xl">
-        <CardHeader>
-          <CardTitle className="text-2xl text-center">Exam Security Setup</CardTitle>
-          <CardDescription className="text-center">
-            This exam requires certain permissions for a secure environment.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="space-y-3">
-            <Button onClick={requestCameraMicPermissions} className="w-full" variant={hasCameraPermission === null ? "outline" : hasCameraPermission ? "default" : "destructive"} disabled={hasCameraPermission === true}>
-              <Camera className="mr-2" /> {hasCameraPermission === null ? "Request Camera & Mic Access" : hasCameraPermission ? "Camera & Mic Granted" : "Camera & Mic Denied - Retry"}
-            </Button>
-             {hasCameraPermission === false && <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Camera/Mic Required</AlertTitle><AlertDescription>Camera and Microphone access is mandatory.</AlertDescription></Alert>}
-          </div>
-          <div className="space-y-3">
-            <Button onClick={requestScreenSharePermission} className="w-full" variant={hasScreenPermission === null ? "outline" : hasScreenPermission ? "default" : "destructive"} disabled={hasScreenPermission === true}>
-              <ScreenShare className="mr-2" /> {hasScreenPermission === null ? "Request Screen Share Access" : hasScreenPermission ? "Screen Share Granted" : "Screen Share Denied - Retry"}
-            </Button>
-            {hasScreenPermission === false && <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Screen Share Required</AlertTitle><AlertDescription>Screen Sharing is mandatory.</AlertDescription></Alert>}
-          </div>
-           <video ref={videoRef} className="w-full aspect-video rounded-md bg-muted hidden" autoPlay muted playsInline /> {/* Hidden or small preview */}
+      <>
+        <Script
+          src="https://www.testwith.co.kr/static/js/testwith_api.js"
+          strategy="lazyOnload"
+          onLoad={() => setTestwithScriptLoaded(true)}
+          onError={() => {
+            toast({ title: 'Testwith API Error', description: 'Failed to load Testwith script.', variant: 'destructive' });
+            setIsLoadingTestwith(false);
+            setTestwithApiReady(false);
+          }}
+        />
+        <Card className="w-full max-w-lg mx-auto my-8 shadow-xl">
+          <CardHeader>
+            <CardTitle className="text-2xl text-center">Exam Security Setup</CardTitle>
+            <CardDescription className="text-center">
+              This exam requires permissions and AI proctoring setup.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="space-y-3">
+              <Button onClick={requestCameraMicPermissions} className="w-full" variant={hasCameraPermission === null ? "outline" : hasCameraPermission ? "default" : "destructive"} disabled={hasCameraPermission === true}>
+                <Camera className="mr-2" /> {hasCameraPermission === null ? "Request Camera & Mic Access" : hasCameraPermission ? "Camera & Mic Granted" : "Camera & Mic Denied - Retry"}
+              </Button>
+               {hasCameraPermission === false && <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Camera/Mic Required</AlertTitle><AlertDescription>Camera and Microphone access is mandatory.</AlertDescription></Alert>}
+            </div>
+            <div className="space-y-3">
+              <Button onClick={requestScreenSharePermission} className="w-full" variant={hasScreenPermission === null ? "outline" : hasScreenPermission ? "default" : "destructive"} disabled={hasScreenPermission === true}>
+                <ScreenShare className="mr-2" /> {hasScreenPermission === null ? "Request Screen Share Access" : hasScreenPermission ? "Screen Share Granted" : "Screen Share Denied - Retry"}
+              </Button>
+              {hasScreenPermission === false && <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Screen Share Required</AlertTitle><AlertDescription>Screen Sharing is mandatory.</AlertDescription></Alert>}
+            </div>
+            <video ref={videoRef} className="w-full aspect-video rounded-md bg-muted hidden" autoPlay muted playsInline />
 
-          <Button onClick={startExamFlow} className="w-full" size="lg" disabled={hasCameraPermission !== true || hasMicPermission !== true || hasScreenPermission !== true}>
-            Continue to Instructions
-          </Button>
-        </CardContent>
-      </Card>
+            {isLoadingTestwith && (
+              <div className="flex items-center justify-center space-x-2 text-muted-foreground">
+                <Loader2 className="h-5 w-5 animate-spin" />
+                <span>Loading Testwith AI Proctoring...</span>
+              </div>
+            )}
+            {!isLoadingTestwith && !testwithApiReady && testwithScriptLoaded && ( // Show error if loading failed
+                <Alert variant="destructive">
+                    <AlertTriangle className="h-4 w-4" />
+                    <AlertTitle>Testwith API Failed</AlertTitle>
+                    <AlertDescription>AI Proctoring service could not be initialized. Please check console for errors or try again.</AlertDescription>
+                </Alert>
+            )}
+            {!isLoadingTestwith && testwithApiReady && (
+                 <Alert variant="default" className="border-green-500 bg-green-50">
+                    <ShieldCheck className="h-5 w-5 text-green-600" />
+                    <AlertTitle className="text-green-700">Testwith AI Proctoring Ready</AlertTitle>
+                    <AlertDescription className="text-green-600">AI supervision service is active.</AlertDescription>
+                </Alert>
+            )}
+
+            <Button onClick={startExamFlow} className="w-full" size="lg" disabled={hasCameraPermission !== true || hasMicPermission !== true || hasScreenPermission !== true || !testwithApiReady || isLoadingTestwith}>
+              Continue to Instructions
+            </Button>
+             {TESTWITH_SERVICE_ID === "YOUR_TESTWITH_SERVICE_ID_HERE" && (
+                <Alert variant="destructive" className="mt-4">
+                    <AlertTriangle className="h-4 w-4" />
+                    <AlertTitle>Action Required</AlertTitle>
+                    <AlertDescription>
+                        Update <code className="font-mono bg-red-100 px-1 rounded">TESTWITH_SERVICE_ID</code> in <code className="font-mono bg-red-100 px-1 rounded">QuizClient.tsx</code> with your actual ID from Testwith.
+                    </AlertDescription>
+                </Alert>
+            )}
+          </CardContent>
+        </Card>
+      </>
     );
   }
 
@@ -404,7 +507,7 @@ export function QuizClient() {
                 <p>Please read the following instructions carefully before starting:</p>
                 <ul className="list-disc list-inside space-y-1 text-muted-foreground">
                     <li>The exam must be taken in fullscreen mode.</li>
-                    <li>Camera, microphone, and screen sharing must remain active.</li>
+                    <li>Camera, microphone, and screen sharing must remain active. AI Proctoring is enabled.</li>
                     <li>Do not switch tabs or minimize the browser window.</li>
                     <li>Copying, pasting, and right-clicking are disabled.</li>
                     <li>Attempting to leave fullscreen or switch tabs will pause the exam.</li>
@@ -446,15 +549,12 @@ export function QuizClient() {
 
   return (
     <div className="space-y-6 md:space-y-8 relative">
-       {/* Proctoring elements could be positioned absolutely or in a top bar */}
        {quizState === 'in_progress' && (
-         <div className="fixed top-2 left-2 z-50 p-2 bg-card/80 backdrop-blur-sm rounded-md shadow-lg flex items-center space-x-2">
-            {hasCameraPermission && <Camera className="h-5 w-5 text-green-500" />}
-            {hasMicPermission && <Mic className="h-5 w-5 text-green-500" />}
-            {hasScreenPermission && <ScreenShare className="h-5 w-5 text-green-500" />}
-            {!hasCameraPermission && <Camera className="h-5 w-5 text-red-500" />}
-            {!hasMicPermission && <Mic className="h-5 w-5 text-red-500" />}
-            {!hasScreenPermission && <ScreenShare className="h-5 w-5 text-red-500" />}
+         <div className="fixed top-2 left-2 z-50 p-2 bg-card/80 backdrop-blur-sm rounded-md shadow-lg flex items-center space-x-2 text-xs">
+            {hasCameraPermission ? <Camera className="h-4 w-4 text-green-500" /> : <Camera className="h-4 w-4 text-red-500" />}
+            {hasMicPermission ? <Mic className="h-4 w-4 text-green-500" /> : <Mic className="h-4 w-4 text-red-500" />}
+            {hasScreenPermission ? <ScreenShare className="h-4 w-4 text-green-500" /> : <ScreenShare className="h-4 w-4 text-red-500" />}
+            {testwithApiReady ? <ShieldCheck className="h-4 w-4 text-green-500" title="Testwith AI Proctoring Active" /> : <ShieldCheck className="h-4 w-4 text-red-500" title="Testwith AI Proctoring Inactive" />}
          </div>
        )}
 
@@ -483,10 +583,6 @@ export function QuizClient() {
                 onTimeUp={() => submitQuiz("Time is up!")}
                 isPaused={isExamPausedByProctoring || quizState === 'submitting' || quizState === 'results'}
               />
-              {/* Optional: Small camera preview
-              {hasCameraPermission && quizState === 'in_progress' && (
-                <video ref={videoRef} className="w-32 h-24 rounded-md bg-black border" autoPlay muted playsInline />
-              )} */}
         </CardContent>
       </Card>
 
@@ -495,7 +591,7 @@ export function QuizClient() {
           <AlertTriangle className="h-5 w-5" />
           <AlertTitle>Exam Paused</AlertTitle>
           <AlertDescription>
-            Your exam is paused due to a potential policy violation (e.g., tab switch). Please ensure you are in fullscreen mode and focused on the exam tab.
+            Your exam is paused due to a potential policy violation (e.g., tab switch or exiting fullscreen). Please ensure you are in fullscreen mode and focused on the exam tab.
           </AlertDescription>
         </Alert>
       )}
@@ -514,7 +610,7 @@ export function QuizClient() {
           isDisabled={isExamPausedByProctoring}
         />
       )}
-      {quizState === 'submitting' && !isExamPausedByProctoring && ( // Only show submitting loader if not paused for other reasons
+      {quizState === 'submitting' && !isExamPausedByProctoring && (
          <div className="flex flex-col items-center justify-center py-10">
             <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
             <p className="text-xl text-muted-foreground">Submitting your answers...</p>
@@ -523,3 +619,4 @@ export function QuizClient() {
     </div>
   );
 }
+
