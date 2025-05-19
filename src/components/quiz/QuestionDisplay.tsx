@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
-import { ChevronRight, Send } from 'lucide-react';
+import { ChevronRight, Send, SkipForward } from 'lucide-react';
 
 interface QuestionDisplayProps {
   questionNumber: number;
@@ -15,6 +15,7 @@ interface QuestionDisplayProps {
   selectedOption: number | null;
   onOptionSelect: (optionIndex: number) => void;
   onNext: () => void;
+  onSkip: () => void;
   onSubmit: () => void;
   isLastQuestion: boolean;
   isSubmitting: boolean;
@@ -28,6 +29,7 @@ export function QuestionDisplay({
   selectedOption,
   onOptionSelect,
   onNext,
+  onSkip,
   onSubmit,
   isLastQuestion,
   isSubmitting,
@@ -63,14 +65,34 @@ export function QuestionDisplay({
             </Label>
           ))}
         </RadioGroup>
-        <div className="flex justify-end mt-8">
+        <div className="flex flex-col sm:flex-row justify-end gap-3 mt-8">
+          <Button 
+            onClick={onSkip} 
+            variant="outline" 
+            size="lg" 
+            disabled={trulyDisabled}
+            className="w-full sm:w-auto"
+          >
+            <SkipForward className="mr-2 h-5 w-5" />
+            Skip
+          </Button>
           {isLastQuestion ? (
-            <Button onClick={onSubmit} size="lg" disabled={selectedOption === null || trulyDisabled}>
+            <Button 
+              onClick={onSubmit} 
+              size="lg" 
+              disabled={selectedOption === null || trulyDisabled}
+              className="w-full sm:w-auto"
+            >
               <Send className="mr-2 h-5 w-5" />
               {isSubmitting ? 'Submitting...' : 'Submit Quiz'}
             </Button>
           ) : (
-            <Button onClick={onNext} size="lg" disabled={selectedOption === null || trulyDisabled}>
+            <Button 
+              onClick={onNext} 
+              size="lg" 
+              disabled={selectedOption === null || trulyDisabled}
+              className="w-full sm:w-auto"
+            >
               Next Question
               <ChevronRight className="ml-2 h-5 w-5" />
             </Button>
@@ -80,3 +102,4 @@ export function QuestionDisplay({
     </Card>
   );
 }
+

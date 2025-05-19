@@ -1,20 +1,18 @@
 
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-// Script import removed as Testwith is no longer used
 import type { GeneratedQuizData, McqQuestion, QuestionAttempt, StudentAnswers } from '@/types/quiz';
 import { useToast } from '@/hooks/use-toast';
 import { analyzeQuizPerformance, type AnalyzeQuizPerformanceInput, type AnalyzeQuizPerformanceOutput } from '@/ai/flows/analyze-quiz-performance';
-// analyzeCameraFeed import removed
 import { QuestionDisplay } from './QuestionDisplay';
 import { ResultsDisplay } from './ResultsDisplay';
 import { TimerDisplay } from './TimerDisplay';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-// Alert and FullScreenWarningModal imports removed
-import { Loader2, BookOpenCheck, XCircle, PlayCircle, AlertTriangle } from 'lucide-react';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Loader2, BookOpenCheck, XCircle, PlayCircle, AlertTriangle, ListRestart } from 'lucide-react';
 
 
 const DEFAULT_QUIZ_DURATION_MINUTES = 15;
@@ -30,8 +28,6 @@ export function QuizClient() {
   const [finalAttemptData, setFinalAttemptData] = useState<QuestionAttempt[]>([]);
   const [quizDurationSeconds, setQuizDurationSeconds] = useState(DEFAULT_QUIZ_DURATION_MINUTES * 60);
 
-  // Proctoring states removed
-
   const router = useRouter();
   const { toast } = useToast();
 
@@ -43,7 +39,7 @@ export function QuizClient() {
         if (parsedQuiz && parsedQuiz.questions && parsedQuiz.questions.length > 0) {
           setQuizData(parsedQuiz);
           setSelectedAnswers(new Array(parsedQuiz.questions.length).fill(null));
-          setQuizState('instructions'); // Go directly to instructions
+          setQuizState('instructions');
           setQuizDurationSeconds(parsedQuiz.durationMinutes > 0 ? parsedQuiz.durationMinutes * 60 : DEFAULT_QUIZ_DURATION_MINUTES * 60);
         } else {
           throw new Error("Invalid quiz data structure or no questions.");
@@ -59,14 +55,12 @@ export function QuizClient() {
     }
   }, [router, toast]);
 
-  // All proctoring related useEffects and functions (request permissions, fullscreen, capture/analyze frame, mic activity) removed.
 
   const beginExam = () => {
     setQuizState('in_progress');
   };
 
   const handleOptionSelect = (optionIndex: number) => {
-    // No proctoring checks needed before selecting
     setSelectedAnswers(prev => {
       const newAnswers = [...prev];
       newAnswers[currentQuestionIndex] = optionIndex;
@@ -75,9 +69,26 @@ export function QuizClient() {
   };
 
   const handleNextQuestion = () => {
-    // No proctoring checks needed
     if (quizData && currentQuestionIndex < quizData.questions.length - 1) {
       setCurrentQuestionIndex(prev => prev + 1);
+    }
+  };
+
+  const handleSkipQuestion = () => {
+    setSelectedAnswers(prev => {
+      const newAnswers = [...prev];
+      newAnswers[currentQuestionIndex] = null;
+      return newAnswers;
+    });
+
+    if (quizData && currentQuestionIndex < quizData.questions.length - 1) {
+      setCurrentQuestionIndex(prev => prev + 1);
+    } else {
+      toast({
+        title: "Last Question Skipped",
+        description: "You've skipped the last question. Press 'Submit Quiz' to complete the exam.",
+        duration: 4000,
+      });
     }
   };
 
@@ -87,8 +98,6 @@ export function QuizClient() {
 
     setQuizState('submitting');
     toast({ title: 'Submitting Quiz...', description: reason || 'Calculating your score and analyzing performance.' });
-
-    // No streams to stop or proctoring timers to clear
 
     let correctAnswers = 0;
     const attemptedQuestions: QuestionAttempt[] = quizData.questions.map((q, index) => {
@@ -124,7 +133,6 @@ export function QuizClient() {
       setIsLoadingAnalysis(false);
       setQuizState('results');
       toast({ title: 'Quiz Submitted!', description: `Your score is ${calculatedScore.toFixed(0)}%.` });
-      // No need to exit fullscreen
     }
   }, [quizData, selectedAnswers, toast, quizState]);
 
@@ -151,6 +159,8 @@ export function QuizClient() {
                     <li>Time limit: {quizData.durationMinutes} minutes.</li>
                     <li>Once started, the timer will begin.</li>
                     <li>Answer each question to the best of your ability.</li>
+                    <li>You can use the navigator to jump between questions.</li>
+                    <li>A "Skip" button is available for each question.</li>
                 </ul>
                 <Button onClick={beginExam} className="w-full" size="lg">
                     <PlayCircle className="mr-2" /> Start Quiz
@@ -186,52 +196,85 @@ export function QuizClient() {
   const currentQuestion: McqQuestion = quizData.questions[currentQuestionIndex];
 
   return (
-    <div className="space-y-6 md:space-y-8 relative pb-24"> 
-      {/* Proctoring related UI (camera preview, status icons, FullScreenWarningModal, humanPresenceIssue alert) removed */}
-
-      <Card className="bg-secondary/30">
-        <CardHeader className="pb-2 md:pb-4 flex flex-row justify-between items-center">
-          <CardTitle className="text-2xl md:text-3xl text-primary flex items-center">
-             <BookOpenCheck className="mr-3 h-7 w-7 md:h-8 md:w-8" />
-             Quiz: {quizData.topic}
-          </CardTitle>
-           {(quizState === 'in_progress' || quizState === 'submitting') && (
-             <Button onClick={() => submitQuiz("Exam ended by user.")} variant="destructive" size="sm" disabled={quizState === 'submitting'}>
-                <XCircle className="mr-2 h-4 w-4" /> End Exam
-             </Button>
-           )}
-        </CardHeader>
-        <CardContent className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-             <TimerDisplay
+    <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-6 md:gap-8 relative pb-24">
+      <div className="space-y-6 md:space-y-8">
+        <Card className="bg-secondary/30">
+          <CardHeader className="pb-2 md:pb-4 flex flex-row justify-between items-center">
+            <CardTitle className="text-2xl md:text-3xl text-primary flex items-center">
+              <BookOpenCheck className="mr-3 h-7 w-7 md:h-8 md:w-8" />
+              Quiz: {quizData.topic}
+            </CardTitle>
+            {(quizState === 'in_progress' || quizState === 'submitting') && (
+              <Button onClick={() => submitQuiz("Exam ended by user.")} variant="destructive" size="sm" disabled={quizState === 'submitting'}>
+                  <XCircle className="mr-2 h-4 w-4" /> End Exam
+              </Button>
+            )}
+          </CardHeader>
+          <CardContent className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <TimerDisplay
                 initialDurationSeconds={quizDurationSeconds}
                 onTimeUp={() => submitQuiz("Time is up!")}
-                isPaused={quizState === 'submitting' || quizState === 'results'} // Simplified pause condition
+                isPaused={quizState === 'submitting' || quizState === 'results'}
               />
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+        
+        {(quizState === 'in_progress' || quizState === 'submitting') && currentQuestion && (
+          <QuestionDisplay
+            questionNumber={currentQuestionIndex + 1}
+            totalQuestions={quizData.questions.length}
+            question={currentQuestion}
+            selectedOption={selectedAnswers[currentQuestionIndex]}
+            onOptionSelect={handleOptionSelect}
+            onNext={handleNextQuestion}
+            onSkip={handleSkipQuestion}
+            onSubmit={() => submitQuiz()}
+            isLastQuestion={currentQuestionIndex === quizData.questions.length - 1}
+            isSubmitting={quizState === 'submitting'}
+            isDisabled={quizState === 'submitting'}
+          />
+        )}
+        {quizState === 'submitting' && (
+          <div className="flex flex-col items-center justify-center py-10">
+              <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
+              <p className="text-xl text-muted-foreground">Submitting your answers...</p>
+            </div>
+        )}
+      </div>
 
-      {/* Proctoring related pause alerts removed */}
-      
-      {(quizState === 'in_progress' || quizState === 'submitting') && currentQuestion && (
-        <QuestionDisplay
-          questionNumber={currentQuestionIndex + 1}
-          totalQuestions={quizData.questions.length}
-          question={currentQuestion}
-          selectedOption={selectedAnswers[currentQuestionIndex]}
-          onOptionSelect={handleOptionSelect}
-          onNext={handleNextQuestion}
-          onSubmit={() => submitQuiz()}
-          isLastQuestion={currentQuestionIndex === quizData.questions.length - 1}
-          isSubmitting={quizState === 'submitting'}
-          isDisabled={quizState === 'submitting'} // Simplified isDisabled condition
-        />
-      )}
-      {quizState === 'submitting' && (
-         <div className="flex flex-col items-center justify-center py-10">
-            <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
-            <p className="text-xl text-muted-foreground">Submitting your answers...</p>
-          </div>
+      {quizState === 'in_progress' && quizData && quizData.questions.length > 0 && (
+        <aside className="lg:sticky lg:top-20 h-fit order-first lg:order-last">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-xl flex items-center">
+                <ListRestart className="mr-2 h-5 w-5" /> Question Navigator
+              </CardTitle>
+              <CardDescription>Jump to any question.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ScrollArea className="max-h-[calc(100vh-22rem)] lg:max-h-[60vh] pr-3"> {/* Adjusted height */}
+                <div className="flex flex-col gap-2">
+                  {quizData.questions.map((_, index) => (
+                    <Button
+                      key={`nav-${index}`}
+                      variant={currentQuestionIndex === index ? 'default' : 'outline'}
+                      onClick={() => setCurrentQuestionIndex(index)}
+                      className="w-full justify-start text-sm h-9"
+                      disabled={quizState === 'submitting'}
+                    >
+                      Question {index + 1}
+                       {selectedAnswers[index] !== null && <span className="ml-auto text-xs opacity-70">(Answered)</span>}
+                       {selectedAnswers[index] === null && currentQuestionIndex !== index && <span className="ml-auto text-xs opacity-50">(Unanswered)</span>}
+                       {currentQuestionIndex === index && <span className="ml-auto text-xs font-semibold">(Current)</span>}
+                    </Button>
+                  ))}
+                </div>
+              </ScrollArea>
+            </CardContent>
+          </Card>
+        </aside>
       )}
     </div>
   );
 }
+
