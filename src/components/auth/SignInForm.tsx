@@ -25,8 +25,7 @@ interface SignInFormProps {
 
 export function SignInForm({ onSuccess, onSwitchToSignUp }: SignInFormProps) {
   const [isLoading, setIsLoading] = useState(false);
-  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
-  const { signInWithEmail, signInWithGoogle, sendPasswordResetEmail } = useAuth();
+  const { signInWithEmail, sendPasswordResetEmail } = useAuth();
   const { toast } = useToast();
 
   const form = useForm<SignInFormValues>({
@@ -47,22 +46,6 @@ export function SignInForm({ onSuccess, onSwitchToSignUp }: SignInFormProps) {
       setIsLoading(false);
     }
   };
-
-  const handleGoogleSignIn = async () => {
-    setIsGoogleLoading(true);
-    try {
-      const user = await signInWithGoogle();
-      if (user) {
-        toast({ title: "Signed In with Google", description: `Welcome, ${user.displayName || 'user'}!` });
-        onSuccess();
-      }
-    } catch (error: any) {
-      console.error("Google sign in error:", error);
-      toast({ title: "Google Sign In Failed", description: error.message || "Could not sign you in with Google.", variant: "destructive" });
-    } finally {
-      setIsGoogleLoading(false);
-    }
-  };
   
   const handlePasswordReset = async () => {
     const email = form.getValues("email");
@@ -71,11 +54,14 @@ export function SignInForm({ onSuccess, onSwitchToSignUp }: SignInFormProps) {
       form.setFocus("email");
       return;
     }
+    setIsLoading(true); // Indicate loading for password reset
     try {
       await sendPasswordResetEmail(email);
       toast({ title: "Password Reset Email Sent", description: "Check your inbox for instructions to reset your password." });
     } catch (error: any) {
       toast({ title: "Password Reset Failed", description: error.message || "Could not send password reset email.", variant: "destructive" });
+    } finally {
+      setIsLoading(false); // Reset loading state
     }
   };
 
@@ -83,34 +69,26 @@ export function SignInForm({ onSuccess, onSwitchToSignUp }: SignInFormProps) {
     <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
       <div>
         <Label htmlFor="email-signin">Email</Label>
-        <Input id="email-signin" type="email" {...form.register("email")} placeholder="you@example.com" disabled={isLoading || isGoogleLoading} />
+        <Input id="email-signin" type="email" {...form.register("email")} placeholder="you@example.com" disabled={isLoading} />
         {form.formState.errors.email && <p className="text-sm text-destructive mt-1">{form.formState.errors.email.message}</p>}
       </div>
       <div>
         <Label htmlFor="password-signin">Password</Label>
-        <Input id="password-signin" type="password" {...form.register("password")} placeholder="••••••••" disabled={isLoading || isGoogleLoading} />
+        <Input id="password-signin" type="password" {...form.register("password")} placeholder="••••••••" disabled={isLoading} />
         {form.formState.errors.password && <p className="text-sm text-destructive mt-1">{form.formState.errors.password.message}</p>}
       </div>
-      <Button type="submit" className="w-full" disabled={isLoading || isGoogleLoading}>
+      <Button type="submit" className="w-full" disabled={isLoading}>
         {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
         Sign In
       </Button>
-      <Button variant="outline" type="button" className="w-full" onClick={handleGoogleSignIn} disabled={isLoading || isGoogleLoading}>
-        {isGoogleLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : (
-          <svg className="mr-2 h-4 w-4" aria-hidden="true" focusable="false" data-prefix="fab" data-icon="google" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 488 512">
-            <path fill="currentColor" d="M488 261.8C488 403.3 381.5 512 244 512 110.3 512 0 398.8 0 256S110.3 0 244 0c72.5 0 132.8 29.4 177.8 75.5L373.3 128C340.7 99.4 298.2 80 244 80c-66.6 0-120.5 47.8-134.6 110.1H244v76.3h244z"></path>
-          </svg>
-        )}
-        Sign In with Google
-      </Button>
       <div className="text-sm text-center">
-        <button type="button" onClick={handlePasswordReset} className="font-medium text-primary hover:underline" disabled={isLoading || isGoogleLoading}>
+        <button type="button" onClick={handlePasswordReset} className="font-medium text-primary hover:underline" disabled={isLoading}>
           Forgot password?
         </button>
       </div>
       <div className="text-sm text-center">
         Don't have an account?{' '}
-        <button type="button" onClick={onSwitchToSignUp} className="font-medium text-primary hover:underline" disabled={isLoading || isGoogleLoading}>
+        <button type="button" onClick={onSwitchToSignUp} className="font-medium text-primary hover:underline" disabled={isLoading}>
           Sign Up
         </button>
       </div>

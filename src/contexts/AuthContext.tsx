@@ -7,8 +7,8 @@ import { auth } from '@/lib/firebase'; // Assuming auth is exported from firebas
 import { 
   onAuthStateChanged, 
   signOut as firebaseSignOut,
-  GoogleAuthProvider,
-  signInWithPopup,
+  // GoogleAuthProvider, // Removed
+  // signInWithPopup, // Removed
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   sendPasswordResetEmail as firebaseSendPasswordResetEmail,
@@ -23,7 +23,7 @@ interface User extends FirebaseUser {
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  signInWithGoogle: () => Promise<User | null>;
+  // signInWithGoogle: () => Promise<User | null>; // Removed
   signUpWithEmail: (email: string, password: string, displayName?: string) => Promise<User | null>;
   signInWithEmail: (email: string, password: string) => Promise<User | null>;
   sendPasswordResetEmail: (email: string) => Promise<void>;
@@ -49,23 +49,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     return () => unsubscribe();
   }, []);
 
-  const signInWithGoogle = async (): Promise<User | null> => {
-    if (!auth) throw new Error("Firebase Auth not initialized.");
-    setLoading(true);
-    try {
-      const provider = new GoogleAuthProvider();
-      const result = await signInWithPopup(auth, provider);
-      setUser(result.user as User);
-      return result.user as User;
-    } catch (error: any) {
-      console.error("AuthContext: Google sign-in error object:", error);
-      console.error("AuthContext: Google sign-in error code:", error.code);
-      console.error("AuthContext: Google sign-in error message:", error.message);
-      throw error; 
-    } finally {
-      setLoading(false);
-    }
-  };
+  // signInWithGoogle function removed
 
   const signUpWithEmail = async (email: string, password: string, displayName?: string): Promise<User | null> => {
     if (!auth) throw new Error("Firebase Auth not initialized.");
@@ -104,8 +88,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     if (!auth) throw new Error("Firebase Auth not initialized.");
     try {
       await firebaseSendPasswordResetEmail(auth, email);
-    } catch (error) {
-      console.error("Error sending password reset email:", error);
+      console.log("AuthContext: Password reset email sent via Firebase for:", email);
+    } catch (error: any) {
+      console.error("Error sending password reset email via Firebase:", error);
+      console.error("Firebase error code:", error.code);
+      console.error("Firebase error message:", error.message);
       throw error;
     }
   };
@@ -132,9 +119,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     );
   }
 
-
   return (
-    <AuthContext.Provider value={{ user, loading, signInWithGoogle, signUpWithEmail, signInWithEmail, sendPasswordResetEmail, signOut }}>
+    <AuthContext.Provider value={{ user, loading, signUpWithEmail, signInWithEmail, sendPasswordResetEmail, signOut }}>
       {children}
     </AuthContext.Provider>
   );
