@@ -12,7 +12,8 @@ import { TimerDisplay } from './TimerDisplay';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Loader2, BookOpenCheck, XCircle, PlayCircle, AlertTriangle, ListRestart } from 'lucide-react';
+import { Loader2, BookOpenCheck, XCircle, PlayCircle, AlertTriangle, ListRestart, Info } from 'lucide-react';
+import { CodeOfConductModal } from './CodeOfConductModal';
 
 
 const DEFAULT_QUIZ_DURATION_MINUTES = 15;
@@ -27,6 +28,7 @@ export function QuizClient() {
   const [isLoadingAnalysis, setIsLoadingAnalysis] = useState(false);
   const [finalAttemptData, setFinalAttemptData] = useState<QuestionAttempt[]>([]);
   const [quizDurationSeconds, setQuizDurationSeconds] = useState(DEFAULT_QUIZ_DURATION_MINUTES * 60);
+  const [showCodeOfConductModal, setShowCodeOfConductModal] = useState(false);
 
   const router = useRouter();
   const { toast } = useToast();
@@ -178,6 +180,7 @@ export function QuizClient() {
 
   if (quizState === 'instructions') {
     return (
+        <>
         <Card className="w-full max-w-lg mx-auto my-8 shadow-xl">
             <CardHeader>
                 <CardTitle className="text-2xl text-center">Quiz Instructions</CardTitle>
@@ -193,11 +196,20 @@ export function QuizClient() {
                     <li>A "Skip" button is available for each question.</li>
                     <li>Actions like copy, paste, and right-click are disabled during the exam.</li>
                 </ul>
-                <Button onClick={beginExam} className="w-full" size="lg">
+                 <Button 
+                    variant="link" 
+                    onClick={() => setShowCodeOfConductModal(true)} 
+                    className="p-0 h-auto text-primary hover:text-accent"
+                  >
+                    <Info className="mr-1 h-4 w-4" /> View Code of Conduct
+                </Button>
+                <Button onClick={beginExam} className="w-full mt-4" size="lg">
                     <PlayCircle className="mr-2" /> Start Quiz
                 </Button>
             </CardContent>
         </Card>
+        <CodeOfConductModal isOpen={showCodeOfConductModal} onOpenChange={setShowCodeOfConductModal} />
+      </>
     );
   }
 
@@ -273,7 +285,7 @@ export function QuizClient() {
         )}
       </div>
 
-      {quizState === 'in_progress' && quizData && quizData.questions.length > 0 && (
+      {(quizState === 'in_progress' && !quizData.questions.some(q => !q)) && quizData.questions.length > 0 && ( // Ensure questions are loaded
         <aside className="lg:sticky lg:top-20 h-fit order-first lg:order-last">
           <Card>
             <CardHeader>
@@ -308,3 +320,4 @@ export function QuizClient() {
     </div>
   );
 }
+
