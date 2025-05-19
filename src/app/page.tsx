@@ -55,6 +55,16 @@ const defaultValues: QuizSettingsFormValues = {
   customQuizDuration: 15,
 };
 
+// Fisher-Yates shuffle function
+function shuffleArray<T>(array: T[]): T[] {
+  const newArray = [...array]; // Create a copy to avoid mutating the original
+  for (let i = newArray.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [newArray[i], newArray[j]] = [newArray[j], newArray[i]];
+  }
+  return newArray;
+}
+
 export default function HomePage() {
   const [isLoading, setIsLoading] = useState(false);
   const router = useRouter();
@@ -110,7 +120,7 @@ export default function HomePage() {
           description: 'AI is working on your questions. This might take a moment.',
         });
 
-        const processedQuestions: McqQuestion[] = [];
+        let processedQuestions: McqQuestion[] = [];
         const ansPattern = /^(?<questionText>.+?)\s*\(ans\)(?<correctAnswerText>.+?)\(ans\)\s*$/i;
 
         const promptsArray = data.customPromptsBlock.trim().split('\n').filter(line => line.trim() !== '');
@@ -159,11 +169,16 @@ export default function HomePage() {
           }
         }
 
+        // Shuffle the processed questions
+        if (processedQuestions.length > 1) {
+          processedQuestions = shuffleArray(processedQuestions);
+        }
+
         if (processedQuestions.length === promptsArray.length && promptsArray.length > 0) {
           const quizData: GeneratedQuizData = {
             id: new Date().toISOString(),
             topic: data.customQuizTitle,
-            questions: processedQuestions,
+            questions: processedQuestions, // Use shuffled questions
             durationMinutes: data.customQuizDuration,
           };
           localStorage.setItem('currentQuiz', JSON.stringify(quizData));
