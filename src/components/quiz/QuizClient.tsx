@@ -138,9 +138,21 @@ export function QuizClient() {
       cameraStreamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        videoRef.current.onloadedmetadata = () => {
-            if (videoRef.current) videoRef.current.play().catch(console.error);
+        // Use 'oncanplay' to ensure video is ready to be played
+        videoRef.current.oncanplay = () => {
+            if (videoRef.current) {
+                videoRef.current.play().catch(err => {
+                    console.error('Error playing video via oncanplay:', err);
+                    toast({
+                        variant: 'destructive',
+                        title: 'Camera Preview Error',
+                        description: 'Could not start camera preview. Please check camera.',
+                    });
+                });
+            }
         };
+        // Explicitly call load() to trigger metadata loading and oncanplay event
+        videoRef.current.load(); 
       }
       setHasCameraPermission(true);
       setHasMicPermission(true);
@@ -326,7 +338,7 @@ export function QuizClient() {
         setHumanPresenceIssueReason("Camera feed issue: Not ready for capture.");
         setIsExamPausedByProctoring(true);
       }
-      setIsAnalyzingFrame(false); // Ensure this is reset
+      setIsAnalyzingFrame(false); 
       return;
     }
     
@@ -347,7 +359,6 @@ export function QuizClient() {
         if (dataUri.length < MIN_DATA_URI_LENGTH_FOR_AI) {
             console.warn("Captured data URI is too short, likely blank/dark frame. Skipping AI analysis.");
             if (gracePeriodChecksCompleted >= PROCTORING_GRACE_PERIOD_CHECKS) {
-                // Treat very short data URI after grace period as a human presence issue
                 aiAnalysisResult = { 
                     isHumanDetected: false, 
                     anomalyReason: "Camera feed unclear or too dark.",
@@ -568,7 +579,7 @@ export function QuizClient() {
   const videoElement = (
     <video 
         ref={videoRef} 
-        className={`bg-muted rounded-md transition-all duration-300 ease-in-out w-full h-full object-cover ${!hasCameraPermission && quizState !== 'in_progress' ? 'hidden' : 'block'}`} 
+        className={`bg-muted rounded-md transition-all duration-300 ease-in-out w-full h-full object-cover block`} 
         autoPlay 
         muted 
         playsInline 
@@ -618,7 +629,7 @@ export function QuizClient() {
               )}
             </div>
             
-            <div className={`w-full aspect-video rounded-md overflow-hidden bg-muted ${hasCameraPermission !== false ? 'block' : 'hidden'}`}>
+            <div className={`w-full aspect-video rounded-md overflow-hidden bg-muted ${hasCameraPermission === true ? 'block' : 'hidden'}`}>
               {videoElement}
             </div>
             { hasCameraPermission === false && (
@@ -670,7 +681,7 @@ export function QuizClient() {
                         <p className="text-sm font-medium text-center mb-1">
                           {hasCameraPermission ? "Camera Preview:" : "Camera permission needed for preview."}
                         </p>
-                        <div className={`w-full max-w-xs mx-auto aspect-video rounded overflow-hidden bg-muted ${hasCameraPermission !== false ? 'block' : 'hidden'}`}>
+                        <div className={`w-full max-w-xs mx-auto aspect-video rounded overflow-hidden bg-muted ${hasCameraPermission === true ? 'block' : 'hidden'}`}>
                             {videoElement}
                           </div>
                          <p className="text-xs text-center mt-2">
