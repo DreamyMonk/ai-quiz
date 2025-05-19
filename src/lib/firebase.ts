@@ -8,50 +8,55 @@ const firebaseConfig = {
   apiKey: "AIzaSyDVPUmXes77UsGu3QYuASM02bxGwdHTfDs",
   authDomain: "ai-quiz-faa35.firebaseapp.com",
   projectId: "ai-quiz-faa35",
-  storageBucket: "ai-quiz-faa35.firebasestorage.app", // Corrected as per image
+  storageBucket: "ai-quiz-faa35.firebasestorage.app",
   messagingSenderId: "1049520882301",
   appId: "1:1049520882301:web:05395861301101560e6714",
   measurementId: "G-KS5531H2PG"
 };
 
 let app: FirebaseApp;
-let db: Firestore;
+let db: Firestore | null = null; // Initialize db as null
 // let auth: Auth;
 
 if (!getApps().length) {
   try {
+    console.log("Firebase: Attempting to initialize app with config:", firebaseConfig);
     app = initializeApp(firebaseConfig);
-    console.log("Firebase initialized successfully.");
+    console.log("Firebase: App initialized successfully. Project ID:", app.options.projectId);
   } catch (error: any) {
-    console.error("Firebase initialization error:", error.code, error.message, error);
-    // Fallback or dummy app to prevent further errors if init fails
-    app = initializeApp({projectId: "fallback-project-due-to-error"}); // Provide a minimal config
+    console.error("Firebase: CRITICAL - App initialization error.", error);
+    console.error("Firebase error code:", error.code);
+    console.error("Firebase error message:", error.message);
+    console.error("Full error object:", JSON.stringify(error, Object.getOwnPropertyNames(error)));
+    // Assign a temporary app object to prevent crashes if 'app' is accessed later, though it's non-functional.
+    app = { options: { projectId: "initialization-failed" } } as FirebaseApp; // Non-functional app with a distinct projectId
   }
 } else {
   app = getApps()[0];
-  console.log("Firebase app already initialized.");
+  console.log("Firebase: App already initialized. Project ID:", app.options.projectId);
 }
 
-try {
-  db = getFirestore(app);
-  console.log("Firestore instance obtained successfully.");
-  // auth = getAuth(app); // Initialize Auth if needed
-} catch (error: any) {
-  console.error("Firestore (or Auth) initialization error:", error.code, error.message, error);
-  // Provide a dummy db to prevent app crashes if running in an environment where Firebase can't init
-  if (typeof window === 'undefined' && !process.env.FIREBASE_CONFIG_JSON) { // Basic check
-     db = {} as Firestore; // Dummy Firestore
-     console.warn("Firestore not initialized, using dummy instance. Ensure Firebase config is correct and environment is suitable.");
+// Only attempt to get Firestore if app initialization seemed to succeed
+if (app && app.options && app.options.projectId && app.options.projectId !== "initialization-failed") {
+  try {
+    console.log("Firebase: Attempting to get Firestore instance...");
+    db = getFirestore(app);
+    console.log("Firebase: Firestore instance obtained successfully. DB Object:", db); // Log the db object
+    // auth = getAuth(app); // Initialize Auth if needed
+  } catch (error: any) {
+    console.error("Firebase: CRITICAL - Firestore instance initialization error.", error);
+    console.error("Firebase error code:", error.code);
+    console.error("Firebase error message:", error.message);
+    console.error("Full error object:", JSON.stringify(error, Object.getOwnPropertyNames(error)));
+    // db remains null if Firestore init fails
+  }
+} else {
+  if (app && app.options && app.options.projectId === "initialization-failed") {
+    console.error("Firebase: App initialization failed previously. Skipping Firestore initialization.");
   } else {
-    // If already in fallback, don't throw again, just log.
-    if (app.options.projectId?.startsWith("fallback-project")) {
-        db = {} as Firestore;
-        console.warn("Using dummy Firestore due to earlier initialization failure.");
-    } else {
-        throw error; // Re-throw if it's not a known safe-to-ignore scenario
-    }
+    console.warn("Firebase: App not properly initialized or projectId is invalid. Skipping Firestore initialization.");
+    console.error("Firebase: App object details:", app);
   }
 }
-
 
 export { app, db /*, auth */ };

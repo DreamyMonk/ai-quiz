@@ -1,5 +1,5 @@
 
-import { db } from '@/lib/firebase';
+import { db } from '@/lib/firebase'; // db can be null
 import { collection, addDoc, getDoc, doc, Timestamp } from 'firebase/firestore';
 import type { McqQuestion, GeneratedQuizData } from '@/types/quiz';
 
@@ -17,6 +17,10 @@ interface QuizDataToSave {
  * @returns The ID of the newly created quiz document in Firestore.
  */
 export async function saveQuiz(quizData: Omit<GeneratedQuizData, 'id' | 'createdAt'>): Promise<string> {
+  if (!db) {
+    console.error("Firestore Service Error: Firestore is not initialized (db instance is null). Cannot save quiz.");
+    throw new Error("Failed to save quiz: Firestore not available. Check Firebase initialization logs.");
+  }
   try {
     console.log("Attempting to save quiz to Firestore:", quizData);
     const quizToSave: QuizDataToSave = {
@@ -30,8 +34,8 @@ export async function saveQuiz(quizData: Omit<GeneratedQuizData, 'id' | 'created
     console.error("Error saving quiz to Firestore: ", error);
     console.error("Firebase error code:", error.code);
     console.error("Firebase error message:", error.message);
-    console.error("Full error object:", JSON.stringify(error, Object.getOwnPropertyNames(error))); // Log full error
-    throw new Error("Failed to save quiz."); // Re-throw the generic error for the toast
+    console.error("Full error object:", JSON.stringify(error, Object.getOwnPropertyNames(error)));
+    throw new Error(`Failed to save quiz: ${error.message || 'Unknown Firestore error'}`);
   }
 }
 
@@ -41,23 +45,24 @@ export async function saveQuiz(quizData: Omit<GeneratedQuizData, 'id' | 'created
  * @returns The quiz data including its ID, or null if not found.
  */
 export async function getQuizById(quizId: string): Promise<GeneratedQuizData | null> {
+  if (!db) {
+    console.error("Firestore Service Error: Firestore is not initialized (db instance is null). Cannot get quiz by ID.");
+    throw new Error("Failed to get quiz: Firestore not available. Check Firebase initialization logs.");
+  }
   try {
     console.log("Attempting to fetch quiz from Firestore. ID:", quizId);
     const docRef = doc(db, "quizzes", quizId);
     const docSnap = await getDoc(docRef);
 
     if (docSnap.exists()) {
-      const data = docSnap.data() as QuizDataToSave; // Assume data matches this structure
+      const data = docSnap.data() as QuizDataToSave;
       console.log("Quiz fetched successfully from Firestore. ID:", docSnap.id);
       return {
         id: docSnap.id,
         topic: data.topic,
         questions: data.questions,
         durationMinutes: data.durationMinutes,
-        // Note: createdAt is a Firestore Timestamp. If you need it as a Date object on client:
-        // createdAt: data.createdAt.toDate() 
-        // For GeneratedQuizData, we might not strictly need createdAt, so omitting for simplicity unless specified.
-      } as GeneratedQuizData; // Ensure all fields of GeneratedQuizData are mapped
+      } as GeneratedQuizData;
     } else {
       console.warn("No such quiz document in Firestore! ID:", quizId);
       return null;
@@ -66,7 +71,7 @@ export async function getQuizById(quizId: string): Promise<GeneratedQuizData | n
     console.error("Error fetching quiz from Firestore: ", error);
     console.error("Firebase error code:", error.code);
     console.error("Firebase error message:", error.message);
-    console.error("Full error object:", JSON.stringify(error, Object.getOwnPropertyNames(error))); // Log full error
-    throw new Error("Failed to fetch quiz."); // Re-throw the generic error for the toast
+    console.error("Full error object:", JSON.stringify(error, Object.getOwnPropertyNames(error)));
+    throw new Error(`Failed to fetch quiz: ${error.message || 'Unknown Firestore error'}`);
   }
 }
