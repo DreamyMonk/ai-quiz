@@ -18,7 +18,7 @@ interface QuestionDisplayProps {
   onSubmit: () => void;
   isLastQuestion: boolean;
   isSubmitting: boolean;
-  isDisabled?: boolean; // New prop to disable interactions
+  isDisabled?: boolean; 
 }
 
 export function QuestionDisplay({
@@ -31,7 +31,7 @@ export function QuestionDisplay({
   onSubmit,
   isLastQuestion,
   isSubmitting,
-  isDisabled = false, // Default to false
+  isDisabled = false, 
 }: QuestionDisplayProps) {
   const trulyDisabled = isSubmitting || isDisabled;
 
