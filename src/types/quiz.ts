@@ -9,6 +9,7 @@ export interface GeneratedQuizData {
   id: string; // Unique ID for the quiz
   topic: string;
   questions: McqQuestion[];
+  durationMinutes: number; // Quiz duration in minutes
 }
 
 // Used for submitting answers and for AI analysis input

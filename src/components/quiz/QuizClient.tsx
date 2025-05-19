@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useEffect, useCallback } from 'react';
@@ -12,7 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { AlertTriangle, Loader2, BookOpenCheck } from 'lucide-react';
 
-const QUIZ_DURATION_MINUTES = 15; // Default 15 minutes for the quiz
+const DEFAULT_QUIZ_DURATION_MINUTES = 15; 
 
 export function QuizClient() {
   const [quizData, setQuizData] = useState<GeneratedQuizData | null>(null);
@@ -23,6 +24,7 @@ export function QuizClient() {
   const [analysis, setAnalysis] = useState<AnalyzeQuizPerformanceOutput | null>(null);
   const [isLoadingAnalysis, setIsLoadingAnalysis] = useState(false);
   const [finalAttemptData, setFinalAttemptData] = useState<QuestionAttempt[]>([]);
+  const [quizDurationSeconds, setQuizDurationSeconds] = useState(DEFAULT_QUIZ_DURATION_MINUTES * 60);
 
 
   const router = useRouter();
@@ -37,6 +39,11 @@ export function QuizClient() {
           setQuizData(parsedQuiz);
           setSelectedAnswers(new Array(parsedQuiz.questions.length).fill(null));
           setQuizState('in_progress');
+          if (parsedQuiz.durationMinutes && parsedQuiz.durationMinutes > 0) {
+            setQuizDurationSeconds(parsedQuiz.durationMinutes * 60);
+          } else {
+            setQuizDurationSeconds(DEFAULT_QUIZ_DURATION_MINUTES * 60);
+          }
         } else {
           throw new Error("Invalid quiz data structure or no questions.");
         }
@@ -91,7 +98,7 @@ export function QuizClient() {
     });
     
     setFinalAttemptData(attemptedQuestions);
-    const calculatedScore = (correctAnswers / quizData.questions.length) * 100;
+    const calculatedScore = quizData.questions.length > 0 ? (correctAnswers / quizData.questions.length) * 100 : 0;
     setScore(calculatedScore);
 
     setIsLoadingAnalysis(true);
@@ -131,7 +138,7 @@ export function QuizClient() {
       <div className="flex flex-col items-center justify-center min-h-[calc(100vh-10rem)] text-center">
         <AlertTriangle className="h-16 w-16 text-destructive mb-4" />
         <h2 className="text-2xl font-semibold mb-2">No Questions Available</h2>
-        <p className="text-muted-foreground mb-6">It seems this quiz has no questions. Please try generating a new one.</p>
+        <p className="text-muted-foreground mb-6">The AI couldn't generate questions for your request. Please try generating a new one with different settings.</p>
         <Button onClick={() => router.push('/')} size="lg">
           Generate New Quiz
         </Button>
@@ -163,7 +170,7 @@ export function QuizClient() {
         </CardHeader>
         <CardContent>
              <TimerDisplay
-                initialDurationSeconds={QUIZ_DURATION_MINUTES * 60}
+                initialDurationSeconds={quizDurationSeconds}
                 onTimeUp={submitQuiz}
                 isPaused={quizState === 'submitting' || quizState === 'results'}
               />
