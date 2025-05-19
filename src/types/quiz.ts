@@ -10,6 +10,8 @@ export interface GeneratedQuizData {
   topic: string;
   questions: McqQuestion[];
   durationMinutes: number; // Quiz duration in minutes
+  userId?: string | null; // Optional: ID of the user who created/took the quiz
+  createdAt?: any; // Firestore Timestamp
 }
 
 // Used for submitting answers and for AI analysis input
@@ -29,6 +31,9 @@ export interface RevisitMaterialInput {
     options: string[];
     correctAnswerIndex: number;
     studentAnswerIndex: number | null; // Could be null if skipped
+    // Added for easier templating
+    studentAnswerText?: string;
+    correctAnswerText?: string;
   }>;
 }
 

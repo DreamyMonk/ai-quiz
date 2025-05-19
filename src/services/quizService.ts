@@ -9,6 +9,7 @@ interface QuizDataToSave {
   questions: McqQuestion[];
   durationMinutes: number;
   createdAt: Timestamp;
+  userId: string | null; // Added userId
 }
 
 function formatFirebaseError(error: any): string {
@@ -18,11 +19,10 @@ function formatFirebaseError(error: any): string {
   } else if (error.code === 'unavailable') {
     message = 'Firestore is currently unavailable. The service might be offline or experiencing issues.';
   }
-  // You can add more specific error code handling here if needed
   console.error("Detailed Firebase Error: ", {
     code: error.code,
     message: error.message,
-    fullError: JSON.stringify(error, Object.getOwnPropertyNames(error), 2) // Indent for readability
+    fullError: JSON.stringify(error, Object.getOwnPropertyNames(error), 2)
   });
   return message;
 }
@@ -30,17 +30,19 @@ function formatFirebaseError(error: any): string {
 /**
  * Saves a new quiz to Firestore.
  * @param quizData The quiz data to save (topic, questions, duration).
+ * @param userId The ID of the user saving the quiz, or null if anonymous.
  * @returns The ID of the newly created quiz document in Firestore.
  */
-export async function saveQuiz(quizData: Omit<GeneratedQuizData, 'id' | 'createdAt'>): Promise<string> {
+export async function saveQuiz(quizData: Omit<GeneratedQuizData, 'id' | 'createdAt' | 'userId'>, userId: string | null): Promise<string> {
   if (!db) {
     console.error("Firestore Service Error: Firestore is not initialized (db instance is null). Cannot save quiz.");
     throw new Error("Failed to save quiz: Firestore not available. Check Firebase initialization logs.");
   }
   try {
-    console.log("Attempting to save quiz to Firestore:", quizData);
+    console.log("Attempting to save quiz to Firestore:", quizData, "for user:", userId);
     const quizToSave: QuizDataToSave = {
       ...quizData,
+      userId: userId,
       createdAt: Timestamp.now(),
     };
     const docRef = await addDoc(collection(db, "quizzes"), quizToSave);
@@ -69,7 +71,7 @@ export async function getQuizById(quizId: string): Promise<GeneratedQuizData | n
     const docSnap = await getDoc(docRef);
 
     if (docSnap.exists()) {
-      const data = docSnap.data() as QuizDataToSave; // Ensure data is cast to the correct type
+      const data = docSnap.data() as QuizDataToSave; 
       console.log("Quiz fetched successfully from Firestore. ID:", docSnap.id, "Data:", data);
       if (!data.questions || !data.topic || typeof data.durationMinutes === 'undefined') {
         console.error("Firestore data for quiz", quizId, "is missing essential fields:", data);
@@ -80,8 +82,9 @@ export async function getQuizById(quizId: string): Promise<GeneratedQuizData | n
         topic: data.topic,
         questions: data.questions,
         durationMinutes: data.durationMinutes,
-        // Note: createdAt is not directly used by QuizClient but is good to have if you were listing quizzes
-      } as GeneratedQuizData; // Explicitly cast to GeneratedQuizData
+        userId: data.userId || null,
+        createdAt: data.createdAt,
+      } as GeneratedQuizData;
     } else {
       console.warn("No such quiz document in Firestore! ID:", quizId);
       return null;
