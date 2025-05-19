@@ -37,7 +37,7 @@ const RevisitMaterialOutputSchema = z.object({
       question: z.string().describe('The original question text.'),
       correctAnswer: z.string().describe('The text of the correct answer.'),
       studentAnswer: z.string().nullable().describe('The text of the student\'s answer if provided, or "Skipped".'),
-      detailedExplanation: z.string().describe('A comprehensive, book-like explanation of the concept tested by the question. It should clarify why the correct answer is right, discuss common misunderstandings related to incorrect options (if applicable), and elaborate on the core principles. Aim for educational depth and use easy-to-understand language.'),
+      detailedExplanation: z.string().describe('A comprehensive, book-like explanation of the concept tested by the question, aiming for a minimum of 500 words. It should clarify why the correct answer is right, discuss common misunderstandings related to incorrect options (if applicable), and elaborate on the core principles. Aim for educational depth and use easy-to-understand language.'),
     })
   ).describe('An array of sections, each dedicated to one incorrect/skipped question with its detailed explanation.'),
 });
@@ -70,7 +70,7 @@ Your response must be structured as a single JSON object matching the RevisitMat
     *   "correctAnswer": The text of the correct option (this will be derived from 'correctAnswerText' below).
     *   "studentAnswer": The text of the student's chosen option (this will be derived from 'studentAnswerText' below), or the word "Skipped" if they didn't answer.
     *   "detailedExplanation": This is the most critical part. For each question:
-        *   Provide a comprehensive, book-like explanation of the core concept(s) being tested.
+        *   Provide a comprehensive, book-like explanation of the core concept(s) being tested. This explanation for each question should aim to be a **minimum of 500 words** to ensure thoroughness.
         *   Clearly and thoroughly elaborate on why the provided "correctAnswer" (as identified below for each question) is indeed correct.
         *   Discuss common misunderstandings or reasons why other options might seem plausible but are incorrect. Address the distractors.
         *   Elaborate on the core principles or knowledge related to the question in an in-depth manner.
@@ -88,7 +88,7 @@ Student's Answer Text (for your reference): {{this.studentAnswerText}}
 ---
 {{/each}}
 
-Focus on providing high-quality, detailed, and helpful content for the "detailedExplanation" field in each section.
+Focus on providing high-quality, detailed, and helpful content for the "detailedExplanation" field in each section, adhering to the minimum word count per explanation.
 Ensure the "correctAnswer" field in your output sections exactly matches the "CorrectAnswerText" provided above for each question.
 Ensure the "studentAnswer" field in your output sections exactly matches the "Student'sAnswerText" (which will be "Skipped" if the student did not answer) provided above for each question.
 Ensure the output is a single, valid JSON object adhering to the RevisitMaterialOutputSchema.
