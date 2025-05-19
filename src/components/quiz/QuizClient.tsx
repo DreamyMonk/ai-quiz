@@ -14,7 +14,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Loader2, BookOpenCheck, XCircle, PlayCircle, AlertTriangle, ListRestart, Info } from 'lucide-react';
 import { CodeOfConductModal } from './CodeOfConductModal';
-import { PledgeModal } from './PledgeModal'; // Import the new PledgeModal
+import { PledgeModal } from './PledgeModal';
 
 
 const DEFAULT_QUIZ_DURATION_MINUTES = 15;
@@ -30,7 +30,7 @@ export function QuizClient() {
   const [finalAttemptData, setFinalAttemptData] = useState<QuestionAttempt[]>([]);
   const [quizDurationSeconds, setQuizDurationSeconds] = useState(DEFAULT_QUIZ_DURATION_MINUTES * 60);
   const [showCodeOfConductModal, setShowCodeOfConductModal] = useState(false);
-  const [showPledgeModal, setShowPledgeModal] = useState(false); // State for PledgeModal
+  const [showPledgeModal, setShowPledgeModal] = useState(false);
 
   const router = useRouter();
   const { toast } = useToast();
@@ -40,13 +40,18 @@ export function QuizClient() {
     if (storedQuiz) {
       try {
         const parsedQuiz: GeneratedQuizData = JSON.parse(storedQuiz);
-        if (parsedQuiz && parsedQuiz.questions && parsedQuiz.questions.length > 0) {
+        if (parsedQuiz && parsedQuiz.questions && parsedQuiz.questions.length > 0 && parsedQuiz.id) { // Ensure ID exists
           setQuizData(parsedQuiz);
-          setSelectedAnswers(new Array(parsedQuiz.questions.length).fill(null));
+          setSelectedAnswers(new Array(parsedQuiz.questions.length).fill(null)); // Crucial reset
+          setCurrentQuestionIndex(0); // Start from the first question
           setQuizState('instructions');
           setQuizDurationSeconds(parsedQuiz.durationMinutes > 0 ? parsedQuiz.durationMinutes * 60 : DEFAULT_QUIZ_DURATION_MINUTES * 60);
+          // Reset other result-related states
+          setScore(0);
+          setAnalysis(null);
+          setFinalAttemptData([]);
         } else {
-          throw new Error("Invalid quiz data structure or no questions.");
+          throw new Error("Invalid quiz data structure, no questions, or missing ID.");
         }
       } catch (error) {
         console.error("Failed to parse quiz data from localStorage:", error);
@@ -57,9 +62,8 @@ export function QuizClient() {
       toast({ title: 'No Quiz Found', description: 'Please generate a quiz first.', variant: 'destructive' });
       router.push('/');
     }
-  }, [router, toast]);
+  }, [router, toast]); // Only depends on router and toast, re-runs if quiz data in localStorage changes and page reloads.
 
-  // Effect for handling copy, cut, paste, and context menu during the quiz
   useEffect(() => {
     const preventAction = (e: Event) => {
       if (quizState === 'in_progress') {
@@ -115,14 +119,13 @@ export function QuizClient() {
   const handleSkipQuestion = () => {
     setSelectedAnswers(prev => {
       const newAnswers = [...prev];
-      newAnswers[currentQuestionIndex] = null; // Mark as skipped (unanswered)
+      newAnswers[currentQuestionIndex] = null;
       return newAnswers;
     });
 
     if (quizData && currentQuestionIndex < quizData.questions.length - 1) {
       setCurrentQuestionIndex(prev => prev + 1);
     } else if (quizData && currentQuestionIndex === quizData.questions.length - 1) {
-      // If it's the last question and skipped, user can still submit.
       toast({
         title: "Last Question Skipped",
         description: "You can now submit your quiz.",
@@ -144,7 +147,7 @@ export function QuizClient() {
         correctAnswers++;
       }
       return {
-        ...q,
+        ...q, // This includes the original question, options, and correctAnswerIndex
         studentAnswerIndex: selectedAnswers[index],
       };
     });
@@ -210,13 +213,13 @@ export function QuizClient() {
                   >
                     <Info className="mr-1 h-4 w-4" /> View Code of Conduct
                 </Button>
-                <Button onClick={openPledgeModal} className="w-full mt-4" size="lg"> {/* Changed to openPledgeModal */}
+                <Button onClick={openPledgeModal} className="w-full mt-4" size="lg">
                     <PlayCircle className="mr-2" /> Start Quiz
                 </Button>
             </CardContent>
         </Card>
         <CodeOfConductModal isOpen={showCodeOfConductModal} onOpenChange={setShowCodeOfConductModal} />
-        <PledgeModal isOpen={showPledgeModal} onConfirm={confirmPledgeAndStartExam} /> {/* Render PledgeModal */}
+        <PledgeModal isOpen={showPledgeModal} onConfirm={confirmPledgeAndStartExam} />
       </>
     );
   }
@@ -241,6 +244,7 @@ export function QuizClient() {
              analysis={analysis}
              isLoadingAnalysis={isLoadingAnalysis}
              topic={quizData.topic}
+             quizDataForRetake={quizData} // Pass the current quizData for retake
            />;
   }
 
@@ -272,6 +276,7 @@ export function QuizClient() {
 
         {(quizState === 'in_progress' || quizState === 'submitting') && currentQuestion && (
           <QuestionDisplay
+            key={`q-${currentQuestionIndex}-${quizData.id}`} // Crucial for re-rendering on re-attempt
             questionNumber={currentQuestionIndex + 1}
             totalQuestions={quizData.questions.length}
             question={currentQuestion}
@@ -282,7 +287,6 @@ export function QuizClient() {
             onSubmit={() => submitQuiz()}
             isLastQuestion={currentQuestionIndex === quizData.questions.length - 1}
             isSubmitting={quizState === 'submitting'}
-            isDisabled={quizState === 'submitting'}
           />
         )}
         {quizState === 'submitting' && (
@@ -293,7 +297,7 @@ export function QuizClient() {
         )}
       </div>
 
-      {(quizState === 'in_progress' && !quizData.questions.some(q => !q)) && quizData.questions.length > 0 && ( // Ensure questions are loaded
+      {(quizState === 'in_progress' && quizData.questions.length > 0) && (
         <aside className="lg:sticky lg:top-20 h-fit order-first lg:order-last">
           <Card>
             <CardHeader>
@@ -307,7 +311,7 @@ export function QuizClient() {
                 <div className="flex flex-col gap-2">
                   {quizData.questions.map((_, index) => (
                     <Button
-                      key={`nav-${index}`}
+                      key={`nav-${index}-${quizData.id}`}
                       variant={currentQuestionIndex === index ? 'default' : 'outline'}
                       onClick={() => setCurrentQuestionIndex(index)}
                       className="w-full justify-start text-sm h-9"
@@ -328,3 +332,4 @@ export function QuizClient() {
     </div>
   );
 }
+

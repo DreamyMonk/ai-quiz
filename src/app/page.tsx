@@ -18,6 +18,7 @@ import { generateOptionsForCustomQuestion, type GenerateOptionsForCustomQuestion
 import { generateSingleMcqFromUserQuery, type GenerateSingleMcqFromUserQueryOutput } from '@/ai/flows/generate-single-mcq-from-user-query';
 import type { GeneratedQuizData, McqQuestion } from '@/types/quiz';
 import { Loader2, Sparkles, Wand2, ListChecks, Clock, PencilLine } from 'lucide-react';
+import { shuffleArray } from '@/lib/utils'; // Import from lib
 
 // Schemas for each mode
 const aiGeneratedQuizSchema = z.object({
@@ -30,27 +31,33 @@ const customQuizSchema = z.object({
   customQuizTitle: z.string().min(3, "Quiz title must be at least 3 characters.").max(100, "Quiz title too long."),
   customPromptsBlock: z.string()
     .min(5, { message: "Please provide at least one question, topic, or prompt (min 5 characters for the entire block)." })
-    .max(30000, { message: "The total text for custom questions is too long (max 30000 characters)." }) 
+    .max(30000, { message: "The total text for custom questions is too long (max 30000 characters)." })
     .refine(value => value.trim().split('\n').filter(line => line.trim() !== '').length > 0, { message: "Please add at least one question or prompt."})
     .refine(value => {
       const lines = value.trim().split('\n').filter(line => line.trim() !== '');
-      // Approximation: count distinct question blocks (e.g., starting with "1.") or individual lines if not part of a block.
-      // This is a heuristic and might not be perfect for all user inputs.
       let questionCount = 0;
-      let inBlock = false;
       const questionStartRegex = /^\s*\d+[.)]\s+/;
+      let currentBlockLines = 0;
+
       for (const line of lines) {
         if (questionStartRegex.test(line)) {
-          questionCount++;
-          inBlock = true;
-        } else if (!line.trim().startsWith("A)") && !line.trim().startsWith("B)") && !line.trim().startsWith("C)") && !line.trim().startsWith("D)") && !line.trim().toLowerCase().startsWith("answer:") && inBlock) {
-          // Likely a multi-line question text, still part of the current question block
-        } else if (!line.trim().startsWith("A)") && !line.trim().startsWith("B)") && !line.trim().startsWith("C)") && !line.trim().startsWith("D)") && !line.trim().toLowerCase().startsWith("answer:")) {
-          // A standalone line prompt
-          questionCount++;
-          inBlock = false;
+          if (currentBlockLines > 0) { // Previous block ended
+             questionCount++;
+          }
+          currentBlockLines = 1; // Start a new block
+        } else if (line.trim()) { // Line is not empty
+            if (currentBlockLines === 0) { // This line is a standalone prompt
+                questionCount++;
+            } else { // This line is part of the current block
+                currentBlockLines++;
+            }
         }
+        // If a block ends and is a full MCQ (question, 4 options, 1 answer = 6 lines min)
+        // or if a line is a standalone prompt, it's counted.
+        // This logic tries to count "items" that will turn into questions.
       }
+      if (currentBlockLines > 0) questionCount++; // count the last block/prompt
+
       return questionCount <= 100;
     }, { message: "You can add a maximum of 100 questions/prompts or fully formatted MCQs."}),
   customQuizDuration: z.coerce.number().int().min(1, "Minimum 1 minute.").max(180, "Maximum 180 minutes."),
@@ -74,23 +81,14 @@ const defaultValues: QuizSettingsFormValues = {
   customQuizDuration: 15,
 };
 
-// Fisher-Yates shuffle function
-function shuffleArray<T>(array: T[]): T[] {
-  const newArray = [...array];
-  for (let i = newArray.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [newArray[i], newArray[j]] = [newArray[j], newArray[i]];
-  }
-  return newArray;
-}
 
 // Helper function to parse fully formatted MCQ blocks
 function parseFullMcqBlock(lines: string[]): McqQuestion | null {
-  if (lines.length < 3) return null; 
+  if (lines.length < 3) return null;
 
   const questionNumberRegex = /^\s*\d+[.)]\s*/;
   const optionLabelRegex = /^\s*([A-Da-d])[.)]\s+/i; // Capture the option letter
-  const answerLineRegex = /^\s*Answer:\s*([A-Da-d])\s*(?:\((.*?)\))?\s*$/i; // Capture answer letter
+  const answerLineRegex = /^\s*Answer:\s*([A-Da-d])\s*(?:\((.*?)\))?\s*$/i; // Capture answer letter, optionally explanation
 
   let questionText = "";
   const parsedOptions: { letter: string, text: string }[] = [];
@@ -110,26 +108,27 @@ function parseFullMcqBlock(lines: string[]): McqQuestion | null {
     if (optionMatch && optionMatch[1]) {
       parsedOptions.push({ letter: optionMatch[1].toUpperCase(), text: currentLine.replace(optionLabelRegex, "").trim() });
     } else if (answerLineRegex.test(currentLine) || questionNumberRegex.test(currentLine)) {
-      break; 
+      // Reached answer line or start of a new question, stop parsing options for current block
+      break;
     } else if (parsedOptions.length > 0) {
-      // Multi-line option
+      // This line is part of the previous option (multi-line option)
       parsedOptions[parsedOptions.length -1].text += `\n${currentLine}`;
     } else {
-      // Multi-line question
+      // This line is part of the question (multi-line question)
       questionText += `\n${currentLine}`;
     }
     lineIndex++;
   }
 
-  // Parse answer line
+  // Parse answer line (could be after options or further down if options were multi-line)
   while(lineIndex < lines.length) {
     const currentLine = lines[lineIndex].trim();
     const answerMatch = currentLine.match(answerLineRegex);
     if (answerMatch && answerMatch[1]) {
         correctAnswerLetter = answerMatch[1].toUpperCase();
-        break; 
+        break; // Found the answer
     }
-    // If it's a new question starting, stop for this block
+    // If it's a new question starting and we haven't found an answer for the current one, this block is malformed.
     if (questionNumberRegex.test(currentLine) && correctAnswerLetter === null) return null;
     lineIndex++;
   }
@@ -138,19 +137,18 @@ function parseFullMcqBlock(lines: string[]): McqQuestion | null {
     return null;
   }
 
-  // Ensure parsed options are sorted A, B, C, D if they came in a different order, though regex should capture them in order.
-  // For safety, or if input isn't strictly A-D ordered:
-  // parsedOptions.sort((a, b) => a.letter.localeCompare(b.letter));
+  const validOptionLetters = ["A", "B", "C", "D"];
+  if (!validOptionLetters.includes(correctAnswerLetter)) return null; // Invalid answer letter
 
   const originalOptionTexts = parsedOptions.map(opt => opt.text);
-  const originalCorrectAnswerText = originalOptionTexts["ABCD".indexOf(correctAnswerLetter)];
+  const originalCorrectAnswerText = originalOptionTexts[validOptionLetters.indexOf(correctAnswerLetter)];
 
-  if (originalCorrectAnswerText === undefined) return null; // Should not happen if correctAnswerLetter is valid
+  if (originalCorrectAnswerText === undefined) return null;
 
   const shuffledOptionTexts = shuffleArray([...originalOptionTexts]);
   const newCorrectAnswerIndex = shuffledOptionTexts.indexOf(originalCorrectAnswerText);
 
-  if (newCorrectAnswerIndex === -1) return null; // Should not happen if shuffle and find work
+  if (newCorrectAnswerIndex === -1) return null;
 
   return {
     question: questionText,
@@ -187,7 +185,7 @@ export default function HomePage() {
 
         if (result.questions && result.questions.length > 0) {
           const quizData: GeneratedQuizData = {
-            id: new Date().toISOString(),
+            id: new Date().toISOString(), // Unique ID for this quiz instance
             topic: data.topic,
             questions: result.questions.map(q => ({
               question: q.question,
@@ -220,30 +218,29 @@ export default function HomePage() {
         
         const questionBlocks: string[][] = [];
         let currentBlock: string[] = [];
-        const questionStartRegex = /^\s*\d+[.)]\s+/; // Detects "1. ", "2) " etc.
+        const questionStartRegex = /^\s*\d+[.)]\s+/;
 
         for (const line of allLines) {
             if (questionStartRegex.test(line) && currentBlock.length > 0) {
                 questionBlocks.push([...currentBlock]);
-                currentBlock = [line]; // Start new block with current line
+                currentBlock = [line];
             } else {
                 currentBlock.push(line);
             }
         }
-        if (currentBlock.length > 0) { // Add the last block
+        if (currentBlock.length > 0) {
             questionBlocks.push([...currentBlock]);
         }
         
         const processingPromises = questionBlocks.map(async (block) => {
           const fullMcq = parseFullMcqBlock(block);
           if (fullMcq) {
-            return fullMcq; // Successfully parsed a full MCQ block
+            return fullMcq;
           } else {
-            // If not a full MCQ block, process each line within the block individually
-            // (or the whole block as one prompt if preferred, but per-line is current)
+            // Block wasn't a full MCQ, process lines within it individually
             const singleLinePromises = block.map(async (lineContent) => {
               const trimmedPrompt = lineContent.trim();
-              if (!trimmedPrompt) return null; // Skip empty lines within a block
+              if (!trimmedPrompt) return null;
 
               const ansPattern = /^(?<questionText>.+?)\s*\(ans\)(?<correctAnswerText>.+?)\(ans\)\s*$/i;
               const match = trimmedPrompt.match(ansPattern);
@@ -285,7 +282,6 @@ export default function HomePage() {
                 }
               }
             });
-            // This will return an array of (settled promises for) questions/nulls from lines in this block
             const lineResults = await Promise.allSettled(singleLinePromises);
             return lineResults
               .filter(res => res.status === 'fulfilled' && res.value)
@@ -298,9 +294,9 @@ export default function HomePage() {
 
         results.forEach((result, blockIndex) => {
           if (result.status === 'fulfilled') {
-            if (Array.isArray(result.value)) { // This means it was an array of questions from single line processing
-              result.value.forEach(mcq => processedQuestions.push(mcq));
-            } else if (result.value) { // This means it was a single McqQuestion from parseFullMcqBlock
+            if (Array.isArray(result.value)) {
+              result.value.forEach(mcq => { if(mcq) processedQuestions.push(mcq); });
+            } else if (result.value) {
               processedQuestions.push(result.value);
             }
           } else { 
@@ -337,9 +333,9 @@ export default function HomePage() {
 
 
         if (processedQuestions.length > 0) {
-          const finalQuestions = shuffleArray(processedQuestions); // Shuffle the final list of all processed questions
+          const finalQuestions = shuffleArray(processedQuestions);
           const quizData: GeneratedQuizData = {
-            id: new Date().toISOString(),
+            id: new Date().toISOString(), // Unique ID for this quiz instance
             topic: data.customQuizTitle,
             questions: finalQuestions,
             durationMinutes: data.customQuizDuration,
@@ -397,15 +393,12 @@ export default function HomePage() {
                       <RadioGroup
                         onValueChange={(value) => {
                           field.onChange(value);
-                          // Reset form preserves relevant values based on mode
                           const currentValues = form.getValues();
                           form.reset({
                             quizMode: value as "ai" | "custom",
-                            // AI Mode fields
                             topic: value === "ai" ? (currentValues.topic || defaultValues.topic) : defaultValues.topic,
                             numberOfQuestions: value === "ai" ? (currentValues.numberOfQuestions || defaultValues.numberOfQuestions) : defaultValues.numberOfQuestions,
                             quizDuration: value === "ai" ? (currentValues.quizDuration || defaultValues.quizDuration) : defaultValues.quizDuration,
-                            // Custom Mode fields
                             customQuizTitle: value === "custom" ? (currentValues.customQuizTitle || defaultValues.customQuizTitle) : defaultValues.customQuizTitle,
                             customPromptsBlock: value === "custom" ? (currentValues.customPromptsBlock || defaultValues.customPromptsBlock) : defaultValues.customPromptsBlock,
                             customQuizDuration: value === "custom" ? (currentValues.customQuizDuration || defaultValues.customQuizDuration) : defaultValues.customQuizDuration,
@@ -508,10 +501,10 @@ export default function HomePage() {
                       <FormItem>
                         <FormLabel className="text-base">Your Questions & Prompts</FormLabel>
                          <FormDescription className="text-sm text-muted-foreground mb-2 space-y-1">
-                          <div>Enter each question/prompt on a new line, or paste blocks of fully formatted MCQs (max 100 questions/items). For pasted MCQs, the options will be shuffled.</div>
+                          <div>Enter each question/prompt on a new line, or paste blocks of fully formatted MCQs (max 100 items). For pasted MCQs, options will be shuffled.</div>
                           <ul className="list-disc list-inside pl-4 mt-1">
                             <li>
-                              <strong>Fully Formatted MCQ:</strong> Paste a question, its options (A, B, C, D), and an "Answer: X" line.
+                              <strong>Fully Formatted MCQ:</strong> Paste a question number, its text, options (A, B, C, D), and an "Answer: X" line. Each part on a new line.
                               <div className="pl-4 my-1 p-2 bg-muted/50 rounded-md text-xs">
                                 <code className="block">1. What is 2+2?</code>
                                 <code className="block">A) 3</code>

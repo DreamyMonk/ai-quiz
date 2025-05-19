@@ -1,19 +1,21 @@
 
 "use client";
 
-import type { QuestionAttempt, RevisitMaterialInput, RevisitMaterialOutput } from '@/types/quiz';
+import type { QuestionAttempt, RevisitMaterialInput, RevisitMaterialOutput, GeneratedQuizData, McqQuestion } from '@/types/quiz';
 import { generateRevisitMaterial } from '@/ai/flows/generate-revisit-material-flow';
 import type { AnalyzeQuizPerformanceOutput } from '@/ai/flows/analyze-quiz-performance';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { CheckCircle2, XCircle, Lightbulb, BarChart3, Repeat, Info, Download, FileText, Loader2 } from 'lucide-react';
+import { CheckCircle2, XCircle, Lightbulb, BarChart3, Repeat, Info, Download, FileText, Loader2, RefreshCw } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import jsPDF from 'jspdf';
 import { useToast } from '@/hooks/use-toast';
 import { GeneratingPdfModal } from './GeneratingPdfModal';
+import { shuffleArray } from '@/lib/utils';
 
 
 interface ResultsDisplayProps {
@@ -22,6 +24,7 @@ interface ResultsDisplayProps {
   analysis: AnalyzeQuizPerformanceOutput | null;
   isLoadingAnalysis: boolean;
   topic: string;
+  quizDataForRetake: GeneratedQuizData | null; // Pass the original quiz data for retake
 }
 
 export function ResultsDisplay({
@@ -30,10 +33,12 @@ export function ResultsDisplay({
   analysis,
   isLoadingAnalysis,
   topic,
+  quizDataForRetake,
 }: ResultsDisplayProps) {
   const [isGeneratingRevisitPdf, setIsGeneratingRevisitPdf] = useState(false);
   const [revisitPdfUrl, setRevisitPdfUrl] = useState<string | null>(null);
   const { toast } = useToast();
+  const router = useRouter();
 
   const getOptionClass = (qIndex: number, optionIndex: number) => {
     const attempt = questionsAttempted[qIndex];
@@ -78,9 +83,8 @@ export function ResultsDisplay({
       
       const revisitData: RevisitMaterialOutput = await generateRevisitMaterial(revisitInput);
 
-      // Generate PDF
       const doc = new jsPDF();
-      let yPos = 20; // Initial Y position
+      let yPos = 20; 
       const pageHeight = doc.internal.pageSize.height;
       const margin = 15;
       const lineSpacing = 7;
@@ -102,7 +106,7 @@ export function ResultsDisplay({
       yPos += lineSpacing * 1.5;
 
       for (const section of revisitData.sections) {
-        if (yPos > pageHeight - margin * 3) { // Check for page break
+        if (yPos > pageHeight - margin * 3) { 
           doc.addPage();
           yPos = margin;
         }
@@ -137,16 +141,15 @@ export function ResultsDisplay({
         yPos += lineSpacing;
 
         doc.setFont(undefined, 'normal');
-        const explanationLines = doc.splitTextToSize(section.detailedExplanation, doc.internal.pageSize.width - margin * 2 - 5 /* indent a bit */);
+        const explanationLines = doc.splitTextToSize(section.detailedExplanation, doc.internal.pageSize.width - margin * 2 - 5);
         doc.text(explanationLines, margin + 5, yPos);
         yPos += explanationLines.length * (lineSpacing - 1) + paragraphSpacing;
 
         if (section !== revisitData.sections[revisitData.sections.length - 1]) {
            if (yPos > pageHeight - margin * 2) { doc.addPage(); yPos = margin; }
-           doc.setDrawColor(200, 200, 200); // light grey
+           doc.setDrawColor(200, 200, 200); 
            doc.line(margin, yPos - (paragraphSpacing / 2), doc.internal.pageSize.width - margin, yPos - (paragraphSpacing / 2));
         }
-
       }
 
       const pdfBlob = doc.output('blob');
@@ -168,6 +171,51 @@ export function ResultsDisplay({
     } finally {
       setIsGeneratingRevisitPdf(false);
     }
+  };
+
+  const handleReattemptQuiz = () => {
+    if (!quizDataForRetake) {
+      toast({
+        title: "Error",
+        description: "Original quiz data not found for re-attempt.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // 1. Deep clone questions from the original quiz data for this attempt
+    const originalQuestions: McqQuestion[] = JSON.parse(JSON.stringify(quizDataForRetake.questions));
+
+    // 2. Shuffle the order of questions
+    const shuffledQuestionOrder = shuffleArray(originalQuestions);
+
+    // 3. For each question, shuffle its options and update correctAnswerIndex
+    const reattemptQuestions = shuffledQuestionOrder.map(q => {
+      const correctAnswerText = q.options[q.correctAnswerIndex];
+      const shuffledOptions = shuffleArray([...q.options]);
+      const newCorrectAnswerIndex = shuffledOptions.indexOf(correctAnswerText);
+      return {
+        ...q,
+        options: shuffledOptions,
+        correctAnswerIndex: newCorrectAnswerIndex,
+      };
+    });
+
+    // 4. Create new GeneratedQuizData
+    const newQuizData: GeneratedQuizData = {
+      id: new Date().toISOString(), // New unique ID for the re-attempt
+      topic: quizDataForRetake.topic,
+      questions: reattemptQuestions,
+      durationMinutes: quizDataForRetake.durationMinutes,
+    };
+
+    // 5. Save to localStorage and navigate
+    localStorage.setItem('currentQuiz', JSON.stringify(newQuizData));
+    toast({
+      title: "Quiz Ready for Re-attempt!",
+      description: "Questions and options have been shuffled. Good luck!",
+    });
+    router.push('/exam');
   };
 
 
@@ -308,16 +356,21 @@ export function ResultsDisplay({
             </Accordion>
           </div>
         </CardContent>
-        <CardFooter className="p-6 flex justify-center">
+        <CardFooter className="p-6 flex flex-col sm:flex-row justify-center gap-4">
           <Link href="/">
             <Button size="lg" variant="outline">
               <Repeat className="mr-2 h-5 w-5" />
               Create Another Quiz
             </Button>
           </Link>
+          <Button size="lg" onClick={handleReattemptQuiz} disabled={!quizDataForRetake}>
+            <RefreshCw className="mr-2 h-5 w-5" />
+            Re-attempt This Quiz
+          </Button>
         </CardFooter>
       </Card>
       <GeneratingPdfModal isOpen={isGeneratingRevisitPdf} />
     </div>
   );
 }
+
