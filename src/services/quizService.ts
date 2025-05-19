@@ -1,7 +1,8 @@
 
 import { db } from '@/lib/firebase'; // db can be null
-import { collection, addDoc, getDoc, doc, Timestamp } from 'firebase/firestore';
+import { collection, addDoc, getDoc, doc, Timestamp, query, where, orderBy, limit, getDocs } from 'firebase/firestore';
 import type { McqQuestion, GeneratedQuizData } from '@/types/quiz';
+import { subDays } from 'date-fns';
 
 // Type for data being saved to Firestore (without the client-side 'id' which becomes the doc ID)
 interface QuizDataToSave {
@@ -9,7 +10,7 @@ interface QuizDataToSave {
   questions: McqQuestion[];
   durationMinutes: number;
   createdAt: Timestamp;
-  userId: string | null; // Added userId
+  userId: string | null; 
 }
 
 function formatFirebaseError(error: any): string {
@@ -27,12 +28,6 @@ function formatFirebaseError(error: any): string {
   return message;
 }
 
-/**
- * Saves a new quiz to Firestore.
- * @param quizData The quiz data to save (topic, questions, duration).
- * @param userId The ID of the user saving the quiz, or null if anonymous.
- * @returns The ID of the newly created quiz document in Firestore.
- */
 export async function saveQuiz(quizData: Omit<GeneratedQuizData, 'id' | 'createdAt' | 'userId'>, userId: string | null): Promise<string> {
   if (!db) {
     console.error("Firestore Service Error: Firestore is not initialized (db instance is null). Cannot save quiz.");
@@ -55,11 +50,6 @@ export async function saveQuiz(quizData: Omit<GeneratedQuizData, 'id' | 'created
   }
 }
 
-/**
- * Fetches a quiz by its ID from Firestore.
- * @param quizId The ID of the quiz document to fetch.
- * @returns The quiz data including its ID, or null if not found.
- */
 export async function getQuizById(quizId: string): Promise<GeneratedQuizData | null> {
   if (!db) {
     console.error("Firestore Service Error: Firestore is not initialized (db instance is null). Cannot get quiz by ID.");
@@ -93,5 +83,48 @@ export async function getQuizById(quizId: string): Promise<GeneratedQuizData | n
     console.error("Error fetching quiz from Firestore: ", error);
     const formattedError = formatFirebaseError(error);
     throw new Error(`Failed to fetch quiz: ${formattedError}`);
+  }
+}
+
+export async function getRecentQuizzesByUserId(userId: string, daysLimit: number = 15): Promise<GeneratedQuizData[]> {
+  if (!db) {
+    console.error("Firestore Service Error: Firestore is not initialized. Cannot get recent quizzes.");
+    throw new Error("Failed to get quizzes: Firestore not available.");
+  }
+  try {
+    const fifteenDaysAgo = subDays(new Date(), daysLimit);
+    const fifteenDaysAgoTimestamp = Timestamp.fromDate(fifteenDaysAgo);
+
+    const q = query(
+      collection(db, "quizzes"),
+      where("userId", "==", userId),
+      where("createdAt", ">=", fifteenDaysAgoTimestamp),
+      orderBy("createdAt", "desc"),
+      limit(20) // Optionally limit the number of quizzes fetched
+    );
+
+    const querySnapshot = await getDocs(q);
+    const quizzes: GeneratedQuizData[] = [];
+    querySnapshot.forEach((docSnap) => {
+      const data = docSnap.data() as QuizDataToSave;
+      if (data.questions && data.topic && typeof data.durationMinutes !== 'undefined') {
+        quizzes.push({
+          id: docSnap.id,
+          topic: data.topic,
+          questions: data.questions,
+          durationMinutes: data.durationMinutes,
+          userId: data.userId,
+          createdAt: data.createdAt,
+        });
+      } else {
+        console.warn("Skipping malformed quiz document in recent quizzes:", docSnap.id, data);
+      }
+    });
+    console.log(`Fetched ${quizzes.length} recent quizzes for user ${userId}`);
+    return quizzes;
+  } catch (error: any) {
+    console.error("Error fetching recent quizzes for user:", userId, error);
+    const formattedError = formatFirebaseError(error);
+    throw new Error(`Failed to fetch recent quizzes: ${formattedError}`);
   }
 }

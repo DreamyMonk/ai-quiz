@@ -2,12 +2,13 @@
 "use client";
 
 import Link from 'next/link';
-import { BookMarked, UserCircle, LogOut, Loader2, MailWarning, MailCheck, Send } from 'lucide-react'; // Added MailWarning, MailCheck, Send
+import { BookMarked, UserCircle, LogOut, Loader2, MailWarning, Send, LockKeyhole, PanelLeft } from 'lucide-react'; // Added LockKeyhole, PanelLeft
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import { useState } from 'react';
 import { AuthModal } from '@/components/auth/AuthModal';
-import { useToast } from '@/hooks/use-toast'; // Added useToast
+import { ChangePasswordModal } from '@/components/auth/ChangePasswordModal'; // Added
+import { useToast } from '@/hooks/use-toast';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -17,13 +18,15 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { SidebarTrigger } from '@/components/ui/sidebar'; // Added
 
 export function Header() {
-  const { user, signOut, loading, sendVerificationEmail } = useAuth(); // Added sendVerificationEmail
+  const { user, signOut, loading, sendVerificationEmail } = useAuth();
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [authModalView, setAuthModalView] = useState<'signIn' | 'signUp'>('signIn');
-  const [isResendingEmail, setIsResendingEmail] = useState(false); // Added state for resend button
-  const { toast } = useToast(); // Added
+  const [isChangePasswordModalOpen, setIsChangePasswordModalOpen] = useState(false); // Added
+  const [isResendingEmail, setIsResendingEmail] = useState(false);
+  const { toast } = useToast();
 
   const handleOpenAuthModal = (view: 'signIn' | 'signUp') => {
     setAuthModalView(view);
@@ -33,7 +36,7 @@ export function Header() {
   const getInitials = (name?: string | null) => {
     if (!name) return 'U';
     const names = name.split(' ');
-    if (names.length > 1) {
+    if (names.length > 1 && names[0] && names[names.length - 1]) {
       return `${names[0][0]}${names[names.length - 1][0]}`.toUpperCase();
     }
     return name.substring(0, 2).toUpperCase();
@@ -63,10 +66,13 @@ export function Header() {
     <>
       <header className="bg-card border-b shadow-sm sticky top-0 z-50">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-2 text-xl font-semibold text-primary hover:text-accent transition-colors">
-            <BookMarked className="h-7 w-7" />
-            <span>AI Quiz Maker</span>
-          </Link>
+          <div className="flex items-center gap-2">
+            <SidebarTrigger className="mr-2 md:hidden" /> {/* Sidebar trigger for mobile */}
+            <Link href="/" className="flex items-center gap-2 text-xl font-semibold text-primary hover:text-accent transition-colors">
+              <BookMarked className="h-7 w-7" />
+              <span>AI Quiz Maker</span>
+            </Link>
+          </div>
           <div className="flex items-center gap-2">
             {loading ? (
               <Loader2 className="h-6 w-6 animate-spin text-primary" />
@@ -110,9 +116,11 @@ export function Header() {
                     <DropdownMenuSeparator />
                     </>
                   )}
-                  {/* <DropdownMenuItem>Profile</DropdownMenuItem> */}
-                  {/* <DropdownMenuItem>Settings</DropdownMenuItem> */}
-                  {/* <DropdownMenuSeparator /> */}
+                  <DropdownMenuItem onClick={() => setIsChangePasswordModalOpen(true)} className="cursor-pointer">
+                    <LockKeyhole className="mr-2 h-4 w-4" />
+                    Change Password
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={signOut} className="cursor-pointer">
                     <LogOut className="mr-2 h-4 w-4" />
                     Sign Out
@@ -136,6 +144,10 @@ export function Header() {
         isOpen={isAuthModalOpen} 
         onOpenChange={setIsAuthModalOpen}
         initialView={authModalView}
+      />
+      <ChangePasswordModal // Added
+        isOpen={isChangePasswordModalOpen}
+        onOpenChange={setIsChangePasswordModalOpen}
       />
     </>
   );

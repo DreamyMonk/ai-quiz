@@ -3,15 +3,16 @@
 
 import type { User as FirebaseUser } from 'firebase/auth';
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { auth } from '@/lib/firebase'; // Assuming auth is exported from firebase.ts
+import { auth } from '@/lib/firebase';
 import { 
   onAuthStateChanged, 
   signOut as firebaseSignOut,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   sendPasswordResetEmail as firebaseSendPasswordResetEmail,
-  sendEmailVerification as firebaseSendEmailVerification, // Added
-  updateProfile
+  sendEmailVerification as firebaseSendEmailVerification,
+  updateProfile,
+  updatePassword as firebaseUpdatePassword // Added
 } from 'firebase/auth';
 import { Loader2 } from 'lucide-react';
 
@@ -25,7 +26,8 @@ interface AuthContextType {
   signUpWithEmail: (email: string, password: string, displayName?: string) => Promise<User | null>;
   signInWithEmail: (email: string, password: string) => Promise<User | null>;
   sendPasswordResetEmail: (email: string) => Promise<void>;
-  sendVerificationEmail: () => Promise<void>; // Added
+  sendVerificationEmail: () => Promise<void>;
+  updateUserPassword: (newPassword: string) => Promise<void>; // Added
   signOut: () => Promise<void>;
 }
 
@@ -59,13 +61,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (userCredential.user && displayName) {
         await updateProfile(userCredential.user, { displayName });
       }
-      // User is available in userCredential.user
-      // Send verification email after successful sign-up
       if (userCredential.user) {
          await firebaseSendEmailVerification(userCredential.user);
          console.log("AuthContext: Verification email sent to new user:", userCredential.user.email);
       }
-      setUser(userCredential.user as User); // This will trigger re-render and update context
+      setUser(userCredential.user as User);
       return userCredential.user as User;
     } catch (error) {
       console.error("Error signing up:", error);
@@ -122,6 +122,21 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  const updateUserPassword = async (newPassword: string): Promise<void> => {
+    if (!auth || !auth.currentUser) {
+      throw new Error("User not logged in or Firebase Auth not initialized.");
+    }
+    try {
+      await firebaseUpdatePassword(auth.currentUser, newPassword);
+      console.log("AuthContext: Password updated successfully for user:", auth.currentUser.email);
+    } catch (error: any) {
+      console.error("Error updating password:", error);
+      console.error("Firebase error code:", error.code);
+      console.error("Firebase error message:", error.message);
+      throw error;
+    }
+  };
+
   const signOut = async (): Promise<void> => {
     if (!auth) throw new Error("Firebase Auth not initialized.");
     setLoading(true);
@@ -145,7 +160,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, signUpWithEmail, signInWithEmail, sendPasswordResetEmail, sendVerificationEmail, signOut }}>
+    <AuthContext.Provider value={{ user, loading, signUpWithEmail, signInWithEmail, sendPasswordResetEmail, sendVerificationEmail, updateUserPassword, signOut }}>
       {children}
     </AuthContext.Provider>
   );
