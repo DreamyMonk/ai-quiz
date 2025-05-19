@@ -26,7 +26,7 @@ interface SignUpFormProps {
 
 export function SignUpForm({ onSuccess, onSwitchToSignIn }: SignUpFormProps) {
   const [isLoading, setIsLoading] = useState(false);
-  const { signUpWithEmail } = useAuth();
+  const { signUpWithEmail } = useAuth(); // sendVerificationEmail is called within signUpWithEmail now
   const { toast } = useToast();
 
   const form = useForm<SignUpFormValues>({
@@ -37,12 +37,25 @@ export function SignUpForm({ onSuccess, onSwitchToSignIn }: SignUpFormProps) {
   const onSubmit: SubmitHandler<SignUpFormValues> = async (data) => {
     setIsLoading(true);
     try {
-      await signUpWithEmail(data.email, data.password, data.displayName);
-      toast({ title: "Account Created", description: "Welcome! You're now signed in." });
-      onSuccess();
+      const signedUpUser = await signUpWithEmail(data.email, data.password, data.displayName || undefined);
+      if (signedUpUser) {
+        toast({ 
+          title: "Account Created!", 
+          description: "Welcome! A verification email has been sent. Please check your inbox." 
+        });
+        onSuccess(); // This will close the modal
+      }
     } catch (error: any) {
       console.error("Sign up error:", error);
-      toast({ title: "Sign Up Failed", description: error.message || "Could not create your account.", variant: "destructive" });
+      let description = error.message || "Could not create your account.";
+      if (error.code === 'auth/email-already-in-use') {
+        description = "This email address is already in use. Please try signing in or use a different email.";
+      }
+      toast({ 
+        title: "Sign Up Failed", 
+        description: description, 
+        variant: "destructive" 
+      });
     } finally {
       setIsLoading(false);
     }

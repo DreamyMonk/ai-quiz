@@ -2,11 +2,12 @@
 "use client";
 
 import Link from 'next/link';
-import { BookMarked, UserCircle, LogOut, Loader2 } from 'lucide-react';
+import { BookMarked, UserCircle, LogOut, Loader2, MailWarning, MailCheck, Send } from 'lucide-react'; // Added MailWarning, MailCheck, Send
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import { useState } from 'react';
 import { AuthModal } from '@/components/auth/AuthModal';
+import { useToast } from '@/hooks/use-toast'; // Added useToast
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,9 +19,11 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
 export function Header() {
-  const { user, signOut, loading } = useAuth();
+  const { user, signOut, loading, sendVerificationEmail } = useAuth(); // Added sendVerificationEmail
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [authModalView, setAuthModalView] = useState<'signIn' | 'signUp'>('signIn');
+  const [isResendingEmail, setIsResendingEmail] = useState(false); // Added state for resend button
+  const { toast } = useToast(); // Added
 
   const handleOpenAuthModal = (view: 'signIn' | 'signUp') => {
     setAuthModalView(view);
@@ -34,6 +37,26 @@ export function Header() {
       return `${names[0][0]}${names[names.length - 1][0]}`.toUpperCase();
     }
     return name.substring(0, 2).toUpperCase();
+  };
+
+  const handleResendVerificationEmail = async () => {
+    if (!user || user.emailVerified) return;
+    setIsResendingEmail(true);
+    try {
+      await sendVerificationEmail();
+      toast({
+        title: "Verification Email Sent",
+        description: "Please check your inbox (and spam folder).",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error Sending Email",
+        description: error.message || "Could not resend verification email.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsResendingEmail(false);
+    }
   };
 
   return (
@@ -55,9 +78,14 @@ export function Header() {
                       <AvatarImage src={user.photoURL || undefined} alt={user.displayName || user.email || "User"} />
                       <AvatarFallback>{getInitials(user.displayName || user.email)}</AvatarFallback>
                     </Avatar>
+                     {!user.emailVerified && (
+                        <span className="absolute bottom-0 right-0 block h-3 w-3 rounded-full bg-yellow-400 ring-2 ring-card border-transparent" title="Email not verified">
+                           <MailWarning className="h-full w-full p-0.5 text-yellow-900" />
+                        </span>
+                     )}
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent className="w-56" align="end" forceMount>
+                <DropdownMenuContent className="w-64" align="end" forceMount>
                   <DropdownMenuLabel className="font-normal">
                     <div className="flex flex-col space-y-1">
                       <p className="text-sm font-medium leading-none">
@@ -69,6 +97,19 @@ export function Header() {
                     </div>
                   </DropdownMenuLabel>
                   <DropdownMenuSeparator />
+                  {!user.emailVerified && (
+                    <>
+                    <DropdownMenuItem onClick={handleResendVerificationEmail} disabled={isResendingEmail} className="cursor-pointer text-yellow-600 hover:!text-yellow-700 focus:!text-yellow-700 focus:!bg-yellow-50">
+                      {isResendingEmail ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Send className="mr-2 h-4 w-4" />
+                      )}
+                      Resend Verification Email
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    </>
+                  )}
                   {/* <DropdownMenuItem>Profile</DropdownMenuItem> */}
                   {/* <DropdownMenuItem>Settings</DropdownMenuItem> */}
                   {/* <DropdownMenuSeparator /> */}

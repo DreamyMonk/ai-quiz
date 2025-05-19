@@ -7,11 +7,10 @@ import { auth } from '@/lib/firebase'; // Assuming auth is exported from firebas
 import { 
   onAuthStateChanged, 
   signOut as firebaseSignOut,
-  // GoogleAuthProvider, // Removed
-  // signInWithPopup, // Removed
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   sendPasswordResetEmail as firebaseSendPasswordResetEmail,
+  sendEmailVerification as firebaseSendEmailVerification, // Added
   updateProfile
 } from 'firebase/auth';
 import { Loader2 } from 'lucide-react';
@@ -23,10 +22,10 @@ interface User extends FirebaseUser {
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  // signInWithGoogle: () => Promise<User | null>; // Removed
   signUpWithEmail: (email: string, password: string, displayName?: string) => Promise<User | null>;
   signInWithEmail: (email: string, password: string) => Promise<User | null>;
   sendPasswordResetEmail: (email: string) => Promise<void>;
+  sendVerificationEmail: () => Promise<void>; // Added
   signOut: () => Promise<void>;
 }
 
@@ -45,11 +44,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
       setUser(firebaseUser as User | null);
       setLoading(false);
+      if (firebaseUser) {
+        console.log("Auth State Changed: User logged in. Email verified:", firebaseUser.emailVerified);
+      }
     });
     return () => unsubscribe();
   }, []);
-
-  // signInWithGoogle function removed
 
   const signUpWithEmail = async (email: string, password: string, displayName?: string): Promise<User | null> => {
     if (!auth) throw new Error("Firebase Auth not initialized.");
@@ -59,10 +59,18 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (userCredential.user && displayName) {
         await updateProfile(userCredential.user, { displayName });
       }
-      setUser(userCredential.user as User);
+      // User is available in userCredential.user
+      // Send verification email after successful sign-up
+      if (userCredential.user) {
+         await firebaseSendEmailVerification(userCredential.user);
+         console.log("AuthContext: Verification email sent to new user:", userCredential.user.email);
+      }
+      setUser(userCredential.user as User); // This will trigger re-render and update context
       return userCredential.user as User;
     } catch (error) {
       console.error("Error signing up:", error);
+      console.error("Firebase error code:", (error as any).code);
+      console.error("Firebase error message:", (error as any).message);
       throw error; 
     } finally {
       setLoading(false);
@@ -78,6 +86,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       return userCredential.user as User;
     } catch (error) {
       console.error("Error signing in:", error);
+      console.error("Firebase error code:", (error as any).code);
+      console.error("Firebase error message:", (error as any).message);
       throw error; 
     } finally {
       setLoading(false);
@@ -91,6 +101,21 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       console.log("AuthContext: Password reset email sent via Firebase for:", email);
     } catch (error: any) {
       console.error("Error sending password reset email via Firebase:", error);
+      console.error("Firebase error code:", error.code);
+      console.error("Firebase error message:", error.message);
+      throw error;
+    }
+  };
+
+  const sendVerificationEmail = async (): Promise<void> => {
+    if (!auth || !auth.currentUser) {
+      throw new Error("User not logged in or Firebase Auth not initialized.");
+    }
+    try {
+      await firebaseSendEmailVerification(auth.currentUser);
+      console.log("AuthContext: Verification email sent to:", auth.currentUser.email);
+    } catch (error: any) {
+      console.error("Error sending verification email:", error);
       console.error("Firebase error code:", error.code);
       console.error("Firebase error message:", error.message);
       throw error;
@@ -120,7 +145,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, signUpWithEmail, signInWithEmail, sendPasswordResetEmail, signOut }}>
+    <AuthContext.Provider value={{ user, loading, signUpWithEmail, signInWithEmail, sendPasswordResetEmail, sendVerificationEmail, signOut }}>
       {children}
     </AuthContext.Provider>
   );
