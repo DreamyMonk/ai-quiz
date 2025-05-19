@@ -1,3 +1,4 @@
+
 "use client";
 
 import type { McqQuestion } from '@/types/quiz';
@@ -17,6 +18,7 @@ interface QuestionDisplayProps {
   onSubmit: () => void;
   isLastQuestion: boolean;
   isSubmitting: boolean;
+  isDisabled?: boolean; // New prop to disable interactions
 }
 
 export function QuestionDisplay({
@@ -29,9 +31,12 @@ export function QuestionDisplay({
   onSubmit,
   isLastQuestion,
   isSubmitting,
+  isDisabled = false, // Default to false
 }: QuestionDisplayProps) {
+  const trulyDisabled = isSubmitting || isDisabled;
+
   return (
-    <Card className="w-full shadow-lg">
+    <Card className={`w-full shadow-lg ${trulyDisabled ? 'opacity-60 pointer-events-none' : ''}`}>
       <CardHeader>
         <CardDescription className="text-base">
           Question {questionNumber} of {totalQuestions}
@@ -43,28 +48,29 @@ export function QuestionDisplay({
           value={selectedOption !== null ? String(selectedOption) : undefined}
           onValueChange={(value) => onOptionSelect(Number(value))}
           className="space-y-3"
+          disabled={trulyDisabled}
         >
           {question.options.map((option, index) => (
             <Label
               key={index}
               htmlFor={`option-${index}`}
-              className={`flex items-center space-x-3 p-4 border rounded-lg cursor-pointer transition-all
+              className={`flex items-center space-x-3 p-4 border rounded-lg transition-all
                 ${selectedOption === index ? 'bg-primary/10 border-primary ring-2 ring-primary' : 'hover:bg-secondary/80'}
-                ${isSubmitting ? 'opacity-70 cursor-not-allowed' : ''}`}
+                ${trulyDisabled ? 'cursor-not-allowed opacity-70' : 'cursor-pointer'}`}
             >
-              <RadioGroupItem value={String(index)} id={`option-${index}`} disabled={isSubmitting} />
+              <RadioGroupItem value={String(index)} id={`option-${index}`} disabled={trulyDisabled} />
               <span className="text-base">{option}</span>
             </Label>
           ))}
         </RadioGroup>
         <div className="flex justify-end mt-8">
           {isLastQuestion ? (
-            <Button onClick={onSubmit} size="lg" disabled={selectedOption === null || isSubmitting}>
+            <Button onClick={onSubmit} size="lg" disabled={selectedOption === null || trulyDisabled}>
               <Send className="mr-2 h-5 w-5" />
               {isSubmitting ? 'Submitting...' : 'Submit Quiz'}
             </Button>
           ) : (
-            <Button onClick={onNext} size="lg" disabled={selectedOption === null || isSubmitting}>
+            <Button onClick={onNext} size="lg" disabled={selectedOption === null || trulyDisabled}>
               Next Question
               <ChevronRight className="ml-2 h-5 w-5" />
             </Button>
