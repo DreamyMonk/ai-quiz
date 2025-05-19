@@ -14,6 +14,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Loader2, BookOpenCheck, XCircle, PlayCircle, AlertTriangle, ListRestart, Info } from 'lucide-react';
 import { CodeOfConductModal } from './CodeOfConductModal';
+import { PledgeModal } from './PledgeModal'; // Import the new PledgeModal
 
 
 const DEFAULT_QUIZ_DURATION_MINUTES = 15;
@@ -29,6 +30,7 @@ export function QuizClient() {
   const [finalAttemptData, setFinalAttemptData] = useState<QuestionAttempt[]>([]);
   const [quizDurationSeconds, setQuizDurationSeconds] = useState(DEFAULT_QUIZ_DURATION_MINUTES * 60);
   const [showCodeOfConductModal, setShowCodeOfConductModal] = useState(false);
+  const [showPledgeModal, setShowPledgeModal] = useState(false); // State for PledgeModal
 
   const router = useRouter();
   const { toast } = useToast();
@@ -87,7 +89,12 @@ export function QuizClient() {
   }, [quizState, toast]);
 
 
-  const beginExam = () => {
+  const openPledgeModal = () => {
+    setShowPledgeModal(true);
+  };
+
+  const confirmPledgeAndStartExam = () => {
+    setShowPledgeModal(false);
     setQuizState('in_progress');
   };
 
@@ -203,12 +210,13 @@ export function QuizClient() {
                   >
                     <Info className="mr-1 h-4 w-4" /> View Code of Conduct
                 </Button>
-                <Button onClick={beginExam} className="w-full mt-4" size="lg">
+                <Button onClick={openPledgeModal} className="w-full mt-4" size="lg"> {/* Changed to openPledgeModal */}
                     <PlayCircle className="mr-2" /> Start Quiz
                 </Button>
             </CardContent>
         </Card>
         <CodeOfConductModal isOpen={showCodeOfConductModal} onOpenChange={setShowCodeOfConductModal} />
+        <PledgeModal isOpen={showPledgeModal} onConfirm={confirmPledgeAndStartExam} /> {/* Render PledgeModal */}
       </>
     );
   }
@@ -320,4 +328,3 @@ export function QuizClient() {
     </div>
   );
 }
-
