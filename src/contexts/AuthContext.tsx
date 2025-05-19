@@ -57,9 +57,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       const result = await signInWithPopup(auth, provider);
       setUser(result.user as User);
       return result.user as User;
-    } catch (error) {
-      console.error("Error signing in with Google:", error);
-      return null;
+    } catch (error: any) {
+      console.error("AuthContext: Google sign-in error object:", error);
+      console.error("AuthContext: Google sign-in error code:", error.code);
+      console.error("AuthContext: Google sign-in error message:", error.message);
+      throw error; 
     } finally {
       setLoading(false);
     }
@@ -77,7 +79,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       return userCredential.user as User;
     } catch (error) {
       console.error("Error signing up:", error);
-      throw error; // Re-throw to be caught by form
+      throw error; 
     } finally {
       setLoading(false);
     }
@@ -92,7 +94,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       return userCredential.user as User;
     } catch (error) {
       console.error("Error signing in:", error);
-      throw error; // Re-throw to be caught by form
+      throw error; 
     } finally {
       setLoading(false);
     }
@@ -121,7 +123,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  if (loading && !auth) { // Initial check if auth itself failed to load
+  if (loading && !auth) { 
      return (
       <div className="flex flex-col items-center justify-center min-h-screen">
         <Loader2 className="h-12 w-12 animate-spin text-destructive mb-4" />
