@@ -1,10 +1,11 @@
+
 "use client";
 
 import type { QuestionAttempt } from '@/types/quiz';
 import type { AnalyzeQuizPerformanceOutput } from '@/ai/flows/analyze-quiz-performance';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { CheckCircle2, XCircle, Lightbulb, BarChart3, Repeat } from 'lucide-react';
+import { CheckCircle2, XCircle, Lightbulb, BarChart3, Repeat, Info } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import Link from 'next/link';
@@ -54,7 +55,7 @@ export function ResultsDisplay({
             <Progress value={score} className="w-full max-w-md mx-auto h-4 mt-2" />
           </div>
 
-          {isLoadingAnalysis && (
+          {isLoadingAnalysis && !analysis && ( // Show loading only if analysis is not yet available
             <div className="text-center py-6">
               <Lightbulb className="mx-auto h-8 w-8 animate-pulse text-primary mb-2" />
               <p className="text-muted-foreground">AI is analyzing your performance...</p>
@@ -69,15 +70,15 @@ export function ResultsDisplay({
               <CardContent className="space-y-4 text-base">
                 <div>
                   <h4 className="font-semibold text-primary">Strengths:</h4>
-                  <p>{analysis.strengths}</p>
+                  <p className="whitespace-pre-wrap">{analysis.strengths}</p>
                 </div>
                 <div>
                   <h4 className="font-semibold text-destructive">Areas for Improvement:</h4>
-                  <p>{analysis.weaknesses}</p>
+                  <p className="whitespace-pre-wrap">{analysis.weaknesses}</p>
                 </div>
                 <div>
                   <h4 className="font-semibold text-accent-foreground">Suggestions:</h4>
-                  <p>{analysis.suggestions}</p>
+                  <p className="whitespace-pre-wrap">{analysis.suggestions}</p>
                 </div>
               </CardContent>
             </Card>
@@ -89,13 +90,13 @@ export function ResultsDisplay({
               {questionsAttempted.map((attempt, index) => (
                 <AccordionItem value={`item-${index}`} key={index}>
                   <AccordionTrigger className="text-lg hover:no-underline">
-                    <div className="flex items-center">
+                    <div className="flex items-center text-left">
                       {attempt.studentAnswerIndex === attempt.correctAnswerIndex ? (
                         <CheckCircle2 className="h-6 w-6 mr-3 text-green-500 flex-shrink-0" />
                       ) : (
                         <XCircle className="h-6 w-6 mr-3 text-red-500 flex-shrink-0" />
                       )}
-                      <span className="text-left">Question {index + 1}: {attempt.question.length > 50 ? attempt.question.substring(0,50) + "..." : attempt.question}</span>
+                      <span className="flex-1">Question {index + 1}: {attempt.question.length > 50 ? attempt.question.substring(0,50) + "..." : attempt.question}</span>
                     </div>
                   </AccordionTrigger>
                   <AccordionContent className="px-4 py-2 space-y-3 bg-slate-50 dark:bg-slate-800 rounded-b-md">
@@ -117,6 +118,26 @@ export function ResultsDisplay({
                       <p className="text-sm text-yellow-600 font-semibold">You did not answer this question.</p>
                     )}
                     <p className="text-sm text-green-700">Correct answer: <span className="font-semibold">{attempt.options[attempt.correctAnswerIndex]}</span></p>
+                    
+                    {analysis && analysis.questionExplanations && analysis.questionExplanations[index] && (
+                      <Card className="mt-4 bg-primary/5 dark:bg-primary/10">
+                        <CardHeader className="pb-2 pt-4">
+                          <CardTitle className="text-md flex items-center text-primary">
+                            <Info className="mr-2 h-5 w-5" />
+                            AI Explanation
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent className="text-sm text-foreground/90">
+                          <p className="whitespace-pre-wrap">{analysis.questionExplanations[index]}</p>
+                        </CardContent>
+                      </Card>
+                    )}
+                     {isLoadingAnalysis && !(analysis && analysis.questionExplanations && analysis.questionExplanations[index]) && (
+                       <div className="text-left py-3">
+                         <Lightbulb className="inline-block h-5 w-5 animate-pulse text-primary mr-1" />
+                         <span className="text-sm text-muted-foreground">Loading explanation...</span>
+                       </div>
+                    )}
                   </AccordionContent>
                 </AccordionItem>
               ))}

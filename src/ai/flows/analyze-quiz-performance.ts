@@ -36,6 +36,9 @@ const AnalyzeQuizPerformanceOutputSchema = z.object({
   strengths: z.string().describe('The student strengths in the topic.'),
   weaknesses: z.string().describe('The student weaknesses in the topic.'),
   suggestions: z.string().describe('Suggestions for improvement.'),
+  questionExplanations: z.array(
+    z.string().describe('A detailed explanation for the question, why the correct answer is correct, common pitfalls, and the key concept tested. This array should have explanations in the same order as the input questions.')
+  ).describe('Detailed explanations for each question in the quiz, in the same order as the input questions.')
 });
 export type AnalyzeQuizPerformanceOutput = z.infer<
   typeof AnalyzeQuizPerformanceOutputSchema
@@ -61,6 +64,7 @@ const analyzeQuizPerformancePrompt = ai.definePrompt({
   Options: {{this.options}}
   Correct Answer Index: {{this.correctAnswerIndex}}
   Student Answer Index: {{this.studentAnswerIndex}}
+  ---
   {{/each}}
 
   Based on the quiz data, provide the following:
@@ -68,6 +72,12 @@ const analyzeQuizPerformancePrompt = ai.definePrompt({
   - strengths: The student strengths in the topic.
   - weaknesses: The student weaknesses in the topic.
   - suggestions: Suggestions for improvement.
+  - questionExplanations: An array of strings. Each string must be a detailed explanation for the corresponding input question.
+    For each question, explain in detail:
+    1. Why the correct answer is indeed correct.
+    2. Common misunderstandings or reasons why a student might choose incorrect options (distractors).
+    3. Briefly reiterate the core concept or knowledge being tested by the question.
+    Ensure the number of explanations in the 'questionExplanations' array precisely matches the number of questions provided in the input, and that they are in the same order.
   `,
 });
 
