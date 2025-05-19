@@ -22,6 +22,7 @@ const DEFAULT_QUIZ_DURATION_MINUTES = 15;
 const FULLSCREEN_RETURN_TIMEOUT_SECONDS = 30; 
 const CAMERA_ANALYSIS_INTERVAL_MS = 5000; // 5 seconds
 const PROCTORING_GRACE_PERIOD_CHECKS = 3; // Number of checks before no-human/mic-inactive pause is enforced
+const MIN_DATA_URI_LENGTH_FOR_AI = 1000; // Minimum length of data URI to consider valid for AI analysis
 
 export function QuizClient() {
   const [quizData, setQuizData] = useState<GeneratedQuizData | null>(null);
@@ -44,6 +45,7 @@ export function QuizClient() {
   const [fullScreenReturnCountdown, setFullScreenReturnCountdown] = useState(FULLSCREEN_RETURN_TIMEOUT_SECONDS);
   const [isAnalyzingFrame, setIsAnalyzingFrame] = useState(false);
   const [humanPresenceIssue, setHumanPresenceIssue] = useState(false);
+  const [humanPresenceIssueReason, setHumanPresenceIssueReason] = useState<string | null>(null);
   const [gracePeriodChecksCompleted, setGracePeriodChecksCompleted] = useState(0);
 
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -156,7 +158,7 @@ export function QuizClient() {
   const requestScreenSharePermission = async () => {
     try {
       const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: { cursor: "always", displaySurface: "monitor" } as MediaTrackConstraints, // Hint for entire screen
+        video: { cursor: "always", displaySurface: "monitor" } as MediaTrackConstraints, 
         audio: false,
       });
       
@@ -172,16 +174,15 @@ export function QuizClient() {
         });
         return true;
       } else {
-        // User shared a window or tab, not the entire screen
-        videoTrack.stop(); // Stop the specific track
-        stream.getTracks().forEach(track => track.stop()); // Ensure all tracks from this stream are stopped
+        videoTrack.stop(); 
+        stream.getTracks().forEach(track => track.stop()); 
         screenStreamRef.current = null;
         setHasScreenPermission(false);
         toast({
           variant: "destructive",
           title: "Incorrect Screen Share Type",
           description: "You must share your ENTIRE SCREEN, not just a window or tab. Please click 'Request Screen Share' again and select your entire screen.",
-          duration: 8000, // Longer duration for this important message
+          duration: 8000, 
         });
         return false;
       }
@@ -226,6 +227,7 @@ export function QuizClient() {
     setQuizState('in_progress');
     setGracePeriodChecksCompleted(0); 
     setHumanPresenceIssue(false); 
+    setHumanPresenceIssueReason(null);
   };
 
 
@@ -239,6 +241,7 @@ export function QuizClient() {
         setShowFullScreenWarningModal(true);
         setIsExamPausedByProctoring(true);
         setHumanPresenceIssue(false); 
+        setHumanPresenceIssueReason(null);
         if (proctoringReturnTimerRef.current) clearTimeout(proctoringReturnTimerRef.current);
         setFullScreenReturnCountdown(FULLSCREEN_RETURN_TIMEOUT_SECONDS); 
         proctoringReturnTimerRef.current = setInterval(() => {
@@ -265,6 +268,7 @@ export function QuizClient() {
         toast({ title: 'Tab Switch Detected', description: 'Switching tabs is not allowed. The exam is paused.', variant: 'destructive' });
         setIsExamPausedByProctoring(true);
         setHumanPresenceIssue(false); 
+        setHumanPresenceIssueReason(null);
       }
     };
 
@@ -317,6 +321,12 @@ export function QuizClient() {
     const videoTrack = cameraStreamRef.current.getVideoTracks()[0];
     if (!videoTrack || !videoRef.current || videoRef.current.readyState < videoRef.current.HAVE_METADATA || videoRef.current.videoWidth === 0) {
       console.warn('Camera track not ready or video element not ready for capture.');
+      if (gracePeriodChecksCompleted >= PROCTORING_GRACE_PERIOD_CHECKS) {
+        setHumanPresenceIssue(true);
+        setHumanPresenceIssueReason("Camera feed issue: Not ready for capture.");
+        setIsExamPausedByProctoring(true);
+      }
+      setIsAnalyzingFrame(false); // Ensure this is reset
       return;
     }
     
@@ -334,11 +344,32 @@ export function QuizClient() {
         ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
         const dataUri = canvas.toDataURL('image/jpeg', 0.7);
 
-        if (dataUri.length < 50) {
-            console.warn("Captured data URI is too short, skipping AI analysis.");
+        if (dataUri.length < MIN_DATA_URI_LENGTH_FOR_AI) {
+            console.warn("Captured data URI is too short, likely blank/dark frame. Skipping AI analysis.");
+            if (gracePeriodChecksCompleted >= PROCTORING_GRACE_PERIOD_CHECKS) {
+                // Treat very short data URI after grace period as a human presence issue
+                aiAnalysisResult = { 
+                    isHumanDetected: false, 
+                    anomalyReason: "Camera feed unclear or too dark.",
+                    isBookDetected: false,
+                    isPhoneDetected: false,
+                    isLookingAway: false
+                };
+            }
         } else {
             const analysisInput: AnalyzeCameraFeedInput = { imageDataUri: dataUri };
             aiAnalysisResult = await analyzeCameraFeed(analysisInput);
+        }
+      } else {
+         console.warn("Could not get canvas context for frame capture.");
+         if (gracePeriodChecksCompleted >= PROCTORING_GRACE_PERIOD_CHECKS) {
+            aiAnalysisResult = { 
+                isHumanDetected: false, 
+                anomalyReason: "Error capturing camera frame.",
+                isBookDetected: false,
+                isPhoneDetected: false,
+                isLookingAway: false
+            };
         }
       }
       currentMicActive = checkMicrophoneActivity();
@@ -351,9 +382,15 @@ export function QuizClient() {
         if (gracePeriodChecksCompleted >= PROCTORING_GRACE_PERIOD_CHECKS) {
             if (!aiAnalysisResult.isHumanDetected || !currentMicActive) {
                 setHumanPresenceIssue(true);
+                let reason = aiAnalysisResult.anomalyReason || "Human presence or microphone issue detected.";
+                if(!aiAnalysisResult.isHumanDetected && !currentMicActive) reason = "Human presence not detected and microphone inactive.";
+                else if (!aiAnalysisResult.isHumanDetected) reason = aiAnalysisResult.anomalyReason || "Human presence not detected.";
+                else if (!currentMicActive) reason = "Microphone appears inactive.";
+                setHumanPresenceIssueReason(reason);
                 setIsExamPausedByProctoring(true);
             } else if (humanPresenceIssue) { 
                 setHumanPresenceIssue(false);
+                setHumanPresenceIssueReason(null);
                 if (!showFullScreenWarningModal) { 
                   setIsExamPausedByProctoring(false);
                 }
@@ -377,6 +414,11 @@ export function QuizClient() {
         description: `Could not analyze camera/mic feed: ${error.message || 'Unknown error'}.`,
         variant: 'destructive',
       });
+       if (gracePeriodChecksCompleted >= PROCTORING_GRACE_PERIOD_CHECKS) {
+        setHumanPresenceIssue(true);
+        setHumanPresenceIssueReason("Error during proctoring analysis.");
+        setIsExamPausedByProctoring(true);
+      }
     } finally {
       setIsAnalyzingFrame(false);
     }
@@ -418,7 +460,7 @@ export function QuizClient() {
 
 
   const handleOptionSelect = (optionIndex: number) => {
-    if (isExamPausedByProctoring || humanPresenceIssue) return;
+    if (isExamPausedByProctoring || humanPresenceIssue || showFullScreenWarningModal) return;
     setSelectedAnswers(prev => {
       const newAnswers = [...prev];
       newAnswers[currentQuestionIndex] = optionIndex;
@@ -427,7 +469,7 @@ export function QuizClient() {
   };
 
   const handleNextQuestion = () => {
-    if (isExamPausedByProctoring || humanPresenceIssue) return;
+    if (isExamPausedByProctoring || humanPresenceIssue || showFullScreenWarningModal) return;
     if (quizData && currentQuestionIndex < quizData.questions.length - 1) {
       setCurrentQuestionIndex(prev => prev + 1);
     }
@@ -526,7 +568,7 @@ export function QuizClient() {
   const videoElement = (
     <video 
         ref={videoRef} 
-        className={`bg-muted rounded-md transition-all duration-300 ease-in-out w-full h-full object-cover ${!hasCameraPermission ? 'hidden' : 'block'}`} 
+        className={`bg-muted rounded-md transition-all duration-300 ease-in-out w-full h-full object-cover ${!hasCameraPermission && quizState !== 'in_progress' ? 'hidden' : 'block'}`} 
         autoPlay 
         muted 
         playsInline 
@@ -576,10 +618,10 @@ export function QuizClient() {
               )}
             </div>
             
-            <div className={`w-full aspect-video rounded-md overflow-hidden bg-muted ${hasCameraPermission ? 'block' : 'hidden'}`}>
+            <div className={`w-full aspect-video rounded-md overflow-hidden bg-muted ${hasCameraPermission !== false ? 'block' : 'hidden'}`}>
               {videoElement}
             </div>
-            { !hasCameraPermission && quizState === 'permission_setup' && (
+            { hasCameraPermission === false && (
                  <Alert variant="destructive">
                     <AlertTriangle className="h-4 w-4" />
                     <AlertTitle>Camera Preview Unavailable</AlertTitle>
@@ -612,7 +654,7 @@ export function QuizClient() {
                 <ul className="list-disc list-inside space-y-1 text-muted-foreground">
                     <li>The exam must be taken in fullscreen mode.</li>
                     <li>Your camera, microphone, and entire screen must remain shared and active. AI-assisted monitoring will be used.</li>
-                    <li>Ensure you are clearly visible in the camera and your microphone is not muted.</li>
+                    <li>Ensure you are clearly visible in the camera and your microphone is not muted. The exam may pause if issues are detected.</li>
                     <li>Do not switch tabs or minimize the browser window.</li>
                     <li>Copying, pasting, and right-clicking are disabled.</li>
                     <li>Attempting to leave fullscreen, switch tabs, or if human presence/mic issues are detected, the exam will pause.</li>
@@ -628,11 +670,9 @@ export function QuizClient() {
                         <p className="text-sm font-medium text-center mb-1">
                           {hasCameraPermission ? "Camera Preview:" : "Camera permission needed for preview."}
                         </p>
-                        {hasCameraPermission && (
-                          <div className="w-full max-w-xs mx-auto aspect-video rounded overflow-hidden bg-muted">
+                        <div className={`w-full max-w-xs mx-auto aspect-video rounded overflow-hidden bg-muted ${hasCameraPermission !== false ? 'block' : 'hidden'}`}>
                             {videoElement}
                           </div>
-                        )}
                          <p className="text-xs text-center mt-2">
                            Mic: {hasMicPermission ? 'Granted' : 'Needed'} | Screen: {hasScreenPermission ? 'Granted (Entire)' : 'Needed (Entire Screen)'}
                          </p>
@@ -679,10 +719,16 @@ export function QuizClient() {
               <ShieldAlert className="h-4 w-4 text-blue-500" title="AI Monitoring Active" />
               {isAnalyzingFrame && <Loader2 className="h-4 w-4 animate-spin text-primary" title="AI Analyzing..." />}
           </div>
-          {hasCameraPermission && (
-            <div className="fixed bottom-4 right-4 w-40 h-30 md:w-48 md:h-36 z-[60] border-2 border-primary rounded-lg overflow-hidden shadow-xl bg-black">
-                {videoElement}
-            </div>
+          
+          <div className={`fixed bottom-4 right-4 w-40 h-30 md:w-48 md:h-36 z-[60] border-2 border-primary rounded-lg overflow-hidden shadow-xl bg-black ${hasCameraPermission ? 'block' : 'hidden'}`}>
+            {videoElement}
+          </div>
+          {!hasCameraPermission && quizState === 'in_progress' && (
+             <Alert variant="destructive" className="fixed bottom-4 right-4 w-48 p-2 z-[60]">
+                  <AlertTriangle className="h-3 w-3" />
+                  <AlertTitle className="text-xs">Camera Inactive</AlertTitle>
+                  <AlertDescription className="text-xs">Camera permission is required for proctoring.</AlertDescription>
+              </Alert>
           )}
          </>
        )}
@@ -700,7 +746,8 @@ export function QuizClient() {
             <UserRoundX className="h-12 w-12 text-destructive mb-3" />
             <AlertTitle className="text-xl md:text-2xl mb-2">Proctoring Alert: Exam Paused</AlertTitle>
             <AlertDescription className="text-base md:text-lg">
-              Human presence not clearly detected or microphone appears inactive.
+              {humanPresenceIssueReason || "Human presence not clearly detected or microphone appears inactive."}
+              <br />
               Please ensure you are clearly visible in the camera and your microphone is picking up sound.
               The exam will resume automatically if the issue is resolved. The timer is still running.
             </AlertDescription>
