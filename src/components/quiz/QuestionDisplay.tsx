@@ -19,7 +19,7 @@ interface QuestionDisplayProps {
   onSubmit: () => void;
   isLastQuestion: boolean;
   isSubmitting: boolean;
-  isDisabled?: boolean; 
+  isDisabled?: boolean;
 }
 
 export function QuestionDisplay({
@@ -33,7 +33,7 @@ export function QuestionDisplay({
   onSubmit,
   isLastQuestion,
   isSubmitting,
-  isDisabled = false, 
+  isDisabled = false,
 }: QuestionDisplayProps) {
   const trulyDisabled = isSubmitting || isDisabled;
 
@@ -66,10 +66,10 @@ export function QuestionDisplay({
           ))}
         </RadioGroup>
         <div className="flex flex-col sm:flex-row justify-end gap-3 mt-8">
-          <Button 
-            onClick={onSkip} 
-            variant="outline" 
-            size="lg" 
+          <Button
+            onClick={onSkip}
+            variant="outline"
+            size="lg"
             disabled={trulyDisabled}
             className="w-full sm:w-auto"
           >
@@ -77,19 +77,19 @@ export function QuestionDisplay({
             Skip
           </Button>
           {isLastQuestion ? (
-            <Button 
-              onClick={onSubmit} 
-              size="lg" 
-              disabled={selectedOption === null || trulyDisabled}
+            <Button
+              onClick={onSubmit}
+              size="lg"
+              disabled={trulyDisabled} // Removed selectedOption === null check here
               className="w-full sm:w-auto"
             >
               <Send className="mr-2 h-5 w-5" />
               {isSubmitting ? 'Submitting...' : 'Submit Quiz'}
             </Button>
           ) : (
-            <Button 
-              onClick={onNext} 
-              size="lg" 
+            <Button
+              onClick={onNext}
+              size="lg"
               disabled={selectedOption === null || trulyDisabled}
               className="w-full sm:w-auto"
             >
@@ -102,4 +102,3 @@ export function QuestionDisplay({
     </Card>
   );
 }
-

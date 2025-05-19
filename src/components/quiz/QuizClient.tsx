@@ -55,6 +55,35 @@ export function QuizClient() {
     }
   }, [router, toast]);
 
+  // Effect for handling copy, cut, paste, and context menu during the quiz
+  useEffect(() => {
+    const preventAction = (e: Event) => {
+      if (quizState === 'in_progress') {
+        e.preventDefault();
+        toast({
+          title: 'Action Disabled',
+          description: 'This action is disabled during the exam.',
+          variant: 'destructive',
+          duration: 3000,
+        });
+      }
+    };
+
+    if (quizState === 'in_progress') {
+      document.addEventListener('copy', preventAction);
+      document.addEventListener('cut', preventAction);
+      document.addEventListener('paste', preventAction);
+      document.addEventListener('contextmenu', preventAction);
+    }
+
+    return () => {
+      document.removeEventListener('copy', preventAction);
+      document.removeEventListener('cut', preventAction);
+      document.removeEventListener('paste', preventAction);
+      document.removeEventListener('contextmenu', preventAction);
+    };
+  }, [quizState, toast]);
+
 
   const beginExam = () => {
     setQuizState('in_progress');
@@ -77,17 +106,18 @@ export function QuizClient() {
   const handleSkipQuestion = () => {
     setSelectedAnswers(prev => {
       const newAnswers = [...prev];
-      newAnswers[currentQuestionIndex] = null;
+      newAnswers[currentQuestionIndex] = null; // Mark as skipped (unanswered)
       return newAnswers;
     });
 
     if (quizData && currentQuestionIndex < quizData.questions.length - 1) {
       setCurrentQuestionIndex(prev => prev + 1);
-    } else {
+    } else if (quizData && currentQuestionIndex === quizData.questions.length - 1) {
+      // If it's the last question and skipped, user can still submit.
       toast({
         title: "Last Question Skipped",
-        description: "You've skipped the last question. Press 'Submit Quiz' to complete the exam.",
-        duration: 4000,
+        description: "You can now submit your quiz.",
+        duration: 3000,
       });
     }
   };
@@ -109,7 +139,7 @@ export function QuizClient() {
         studentAnswerIndex: selectedAnswers[index],
       };
     });
-    
+
     setFinalAttemptData(attemptedQuestions);
     const calculatedScore = quizData.questions.length > 0 ? (correctAnswers / quizData.questions.length) * 100 : 0;
     setScore(calculatedScore);
@@ -161,6 +191,7 @@ export function QuizClient() {
                     <li>Answer each question to the best of your ability.</li>
                     <li>You can use the navigator to jump between questions.</li>
                     <li>A "Skip" button is available for each question.</li>
+                    <li>Actions like copy, paste, and right-click are disabled during the exam.</li>
                 </ul>
                 <Button onClick={beginExam} className="w-full" size="lg">
                     <PlayCircle className="mr-2" /> Start Quiz
@@ -169,7 +200,7 @@ export function QuizClient() {
         </Card>
     );
   }
-  
+
   if (quizData.questions.length === 0 && quizState !== 'loading') {
      return (
       <div className="flex flex-col items-center justify-center min-h-[calc(100vh-10rem)] text-center">
@@ -184,12 +215,12 @@ export function QuizClient() {
   }
 
   if (quizState === 'results') {
-    return <ResultsDisplay 
-             score={score} 
-             questionsAttempted={finalAttemptData} 
+    return <ResultsDisplay
+             score={score}
+             questionsAttempted={finalAttemptData}
              analysis={analysis}
              isLoadingAnalysis={isLoadingAnalysis}
-             topic={quizData.topic} 
+             topic={quizData.topic}
            />;
   }
 
@@ -218,7 +249,7 @@ export function QuizClient() {
               />
           </CardContent>
         </Card>
-        
+
         {(quizState === 'in_progress' || quizState === 'submitting') && currentQuestion && (
           <QuestionDisplay
             questionNumber={currentQuestionIndex + 1}
@@ -252,7 +283,7 @@ export function QuizClient() {
               <CardDescription>Jump to any question.</CardDescription>
             </CardHeader>
             <CardContent>
-              <ScrollArea className="max-h-[calc(100vh-22rem)] lg:max-h-[60vh] pr-3"> {/* Adjusted height */}
+              <ScrollArea className="max-h-[calc(100vh-22rem)] lg:max-h-[60vh] pr-3">
                 <div className="flex flex-col gap-2">
                   {quizData.questions.map((_, index) => (
                     <Button
@@ -277,4 +308,3 @@ export function QuizClient() {
     </div>
   );
 }
-
