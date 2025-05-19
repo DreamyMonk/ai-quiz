@@ -2,12 +2,12 @@
 "use client";
 
 import Link from 'next/link';
-import { BookMarked, UserCircle, LogOut, Loader2, MailWarning, Send, LockKeyhole, PanelLeft } from 'lucide-react'; // Added LockKeyhole, PanelLeft
+import { BookMarked, UserCircle, LogOut, Loader2, MailWarning, Send, LockKeyhole, PanelLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import { useState } from 'react';
 import { AuthModal } from '@/components/auth/AuthModal';
-import { ChangePasswordModal } from '@/components/auth/ChangePasswordModal'; // Added
+import { ChangePasswordModal } from '@/components/auth/ChangePasswordModal';
 import { useToast } from '@/hooks/use-toast';
 import {
   DropdownMenu,
@@ -18,13 +18,17 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { SidebarTrigger } from '@/components/ui/sidebar'; // Added
+import { SidebarTrigger } from '@/components/ui/sidebar';
+import { useLayout } from '@/contexts/LayoutContext'; // Import useLayout
 
 export function Header() {
   const { user, signOut, loading, sendVerificationEmail } = useAuth();
+  const { isSidebarVisible } = useLayout(); // Consume layout context
+  console.log("Header: isSidebarVisible from context:", isSidebarVisible); // Log context value
+
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [authModalView, setAuthModalView] = useState<'signIn' | 'signUp'>('signIn');
-  const [isChangePasswordModalOpen, setIsChangePasswordModalOpen] = useState(false); // Added
+  const [isChangePasswordModalOpen, setIsChangePasswordModalOpen] = useState(false);
   const [isResendingEmail, setIsResendingEmail] = useState(false);
   const { toast } = useToast();
 
@@ -67,7 +71,8 @@ export function Header() {
       <header className="bg-card border-b shadow-sm sticky top-0 z-50">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <SidebarTrigger className="mr-2 md:hidden" /> {/* Sidebar trigger for mobile */}
+            {/* Conditionally render SidebarTrigger based on isSidebarVisible */}
+            {isSidebarVisible && <SidebarTrigger className="mr-2 md:hidden" />}
             <Link href="/" className="flex items-center gap-2 text-xl font-semibold text-primary hover:text-accent transition-colors">
               <BookMarked className="h-7 w-7" />
               <span>AI Quiz Maker</span>
@@ -145,7 +150,7 @@ export function Header() {
         onOpenChange={setIsAuthModalOpen}
         initialView={authModalView}
       />
-      <ChangePasswordModal // Added
+      <ChangePasswordModal
         isOpen={isChangePasswordModalOpen}
         onOpenChange={setIsChangePasswordModalOpen}
       />

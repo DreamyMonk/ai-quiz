@@ -2,11 +2,11 @@
 "use client";
 
 import { useState, useEffect, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation'; // Import usePathname
 import type { GeneratedQuizData, McqQuestion, QuestionAttempt, StudentAnswers } from '@/types/quiz';
 import { useToast } from '@/hooks/use-toast';
 import { analyzeQuizPerformance, type AnalyzeQuizPerformanceInput, type AnalyzeQuizPerformanceOutput } from '@/ai/flows/analyze-quiz-performance';
-import { getQuizById } from '@/services/quizService'; // Import Firestore service
+import { getQuizById } from '@/services/quizService';
 import { QuestionDisplay } from './QuestionDisplay';
 import { ResultsDisplay } from './ResultsDisplay';
 import { TimerDisplay } from './TimerDisplay';
@@ -16,6 +16,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Loader2, BookOpenCheck, XCircle, PlayCircle, ListRestart, Info, AlertTriangle } from 'lucide-react';
 import { CodeOfConductModal } from './CodeOfConductModal';
 import { PledgeModal } from './PledgeModal';
+import { useLayout } from '@/contexts/LayoutContext'; // Import useLayout
 
 const DEFAULT_QUIZ_DURATION_MINUTES = 15;
 
@@ -38,23 +39,48 @@ export function QuizClient({ quizId }: QuizClientProps) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const router = useRouter();
+  const pathname = usePathname(); // For main useEffect dependency
   const { toast } = useToast();
+  const { setIsSidebarVisible } = useLayout(); // Consume LayoutContext
 
+  // Effect to control sidebar visibility based on quiz state
   useEffect(() => {
-    console.log("QuizClient: useEffect for quiz fetching triggered. quizId:", quizId);
+    console.log(`QuizClient: Sidebar effect triggered. quizState: ${quizState}`);
+    if (quizState === 'loading' || quizState === 'instructions' || quizState === 'in_progress' || quizState === 'submitting') {
+      console.log("QuizClient: Setting sidebar NOT visible.");
+      setIsSidebarVisible(false);
+    } else { // 'results' or 'error'
+      console.log("QuizClient: Setting sidebar VISIBLE.");
+      setIsSidebarVisible(true);
+    }
+
+    // Cleanup: show sidebar when navigating away from exam page (QuizClient unmounts)
+    return () => {
+      console.log("QuizClient: Unmounting, setting sidebar VISIBLE for other pages.");
+      setIsSidebarVisible(true);
+    };
+  }, [quizState, setIsSidebarVisible]);
+
+
+  // Main effect to load quiz data from Firestore
+  useEffect(() => {
+    console.log("QuizClient: Main data-loading useEffect triggered. quizId:", quizId, "Current quizState:", quizState);
     if (!quizId) {
+      console.error("QuizClient: No Quiz ID provided in props.");
       setErrorMessage("No Quiz ID provided.");
       setQuizState('error');
       return;
     }
 
     const fetchQuiz = async () => {
+      console.log("QuizClient: Setting state to 'loading' for quizId:", quizId);
       setQuizState('loading');
       setErrorMessage(null);
       try {
         const fetchedQuiz = await getQuizById(quizId);
         if (fetchedQuiz) {
-          console.log("QuizClient: Fetched quiz from Firestore. ID:", fetchedQuiz.id);
+          console.log("QuizClient: Fetched quiz from Firestore. New ID:", fetchedQuiz.id, "Current component quizData.id:", quizData?.id);
+          // Reset all states for the new quiz, regardless of previous quizData.id
           setQuizData(fetchedQuiz);
           setSelectedAnswers(new Array(fetchedQuiz.questions.length).fill(null));
           setCurrentQuestionIndex(0);
@@ -63,10 +89,10 @@ export function QuizClient({ quizId }: QuizClientProps) {
           setFinalAttemptData([]);
           setQuizState('instructions');
           setQuizDurationSeconds(fetchedQuiz.durationMinutes > 0 ? fetchedQuiz.durationMinutes * 60 : DEFAULT_QUIZ_DURATION_MINUTES * 60);
-          console.log("QuizClient: States reset for new quiz. quizState set to 'instructions'.");
+          console.log("QuizClient: States reset for new quiz. quizState set to 'instructions'. Quiz ID:", fetchedQuiz.id);
         } else {
           console.error("QuizClient: Quiz not found in Firestore for ID:", quizId);
-          toast({ title: 'Quiz Not Found', description: 'The requested quiz could not be found. It might have been deleted or the ID is incorrect.', variant: 'destructive' });
+          toast({ title: 'Quiz Not Found', description: 'The requested quiz could not be found.', variant: 'destructive' });
           setErrorMessage("Quiz not found. Please check the ID or generate a new quiz.");
           setQuizState('error');
         }
@@ -79,7 +105,9 @@ export function QuizClient({ quizId }: QuizClientProps) {
     };
 
     fetchQuiz();
-  }, [quizId, toast]); // Dependency: quizId and toast
+    // quizData?.id is not needed here if we always reset on quizId change.
+    // router and toast are stable, but good practice to include if used in effect.
+  }, [quizId, router, toast]);
 
 
   const openPledgeModal = () => {
@@ -109,7 +137,7 @@ export function QuizClient({ quizId }: QuizClientProps) {
   const handleSkipQuestion = () => {
     setSelectedAnswers(prev => {
       const newAnswers = [...prev];
-      newAnswers[currentQuestionIndex] = null; 
+      newAnswers[currentQuestionIndex] = null;
       return newAnswers;
     });
 
@@ -179,7 +207,7 @@ export function QuizClient({ quizId }: QuizClientProps) {
       </div>
     );
   }
-  
+
   if (quizState === 'error') {
     return (
       <div className="flex flex-col items-center justify-center min-h-[calc(100vh-10rem)] text-center p-4">
@@ -193,7 +221,7 @@ export function QuizClient({ quizId }: QuizClientProps) {
     );
   }
 
-  if (!quizData) { // Should be caught by 'loading' or 'error' state, but as a fallback
+  if (!quizData) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[calc(100vh-10rem)]">
         <p className="text-xl text-muted-foreground">Quiz data is not available.</p>
@@ -221,9 +249,9 @@ export function QuizClient({ quizId }: QuizClientProps) {
                     <li>You can use the navigator to jump between questions.</li>
                     <li>A "Skip" button is available for each question.</li>
                 </ul>
-                 <Button 
-                    variant="link" 
-                    onClick={() => setShowCodeOfConductModal(true)} 
+                 <Button
+                    variant="link"
+                    onClick={() => setShowCodeOfConductModal(true)}
                     className="p-0 h-auto text-primary hover:text-accent"
                   >
                     <Info className="mr-1 h-4 w-4" /> View Code of Conduct
@@ -260,7 +288,7 @@ export function QuizClient({ quizId }: QuizClientProps) {
              analysis={analysis}
              isLoadingAnalysis={isLoadingAnalysis}
              topic={quizData.topic}
-             quizDataForRetake={quizData}
+             quizDataForRetake={quizData} // Pass the current quizData for re-attempt
            />;
   }
 
@@ -307,7 +335,7 @@ export function QuizClient({ quizId }: QuizClientProps) {
             isDisabled={isSubmittingOrDone}
           />
         )}
-        {quizState === 'submitting' && !currentQuestion && ( 
+        {quizState === 'submitting' && !currentQuestion && (
           <div className="flex flex-col items-center justify-center py-10">
               <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
               <p className="text-xl text-muted-foreground">Submitting your answers...</p>
