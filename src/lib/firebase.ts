@@ -8,7 +8,7 @@ const firebaseConfig = {
   apiKey: "AIzaSyDVPUmXes77UsGu3QYuASM02bxGwdHTfDs",
   authDomain: "ai-quiz-faa35.firebaseapp.com",
   projectId: "ai-quiz-faa35",
-  storageBucket: "ai-quiz-faa35.appspot.com", // Corrected from .firebasestorage.app to .appspot.com as is typical
+  storageBucket: "ai-quiz-faa35.firebasestorage.app",
   messagingSenderId: "1049520882301",
   appId: "1:1049520882301:web:05395861301101560e6714",
   measurementId: "G-KS5531H2PG"
