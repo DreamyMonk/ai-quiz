@@ -1,14 +1,20 @@
 
 "use client";
 
-import type { QuestionAttempt } from '@/types/quiz';
+import type { QuestionAttempt, RevisitMaterialInput, RevisitMaterialOutput } from '@/types/quiz';
+import { generateRevisitMaterial } from '@/ai/flows/generate-revisit-material-flow';
 import type { AnalyzeQuizPerformanceOutput } from '@/ai/flows/analyze-quiz-performance';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { CheckCircle2, XCircle, Lightbulb, BarChart3, Repeat, Info } from 'lucide-react';
+import { CheckCircle2, XCircle, Lightbulb, BarChart3, Repeat, Info, Download, FileText, Loader2 } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import Link from 'next/link';
+import { useState } from 'react';
+import jsPDF from 'jspdf';
+import { useToast } from '@/hooks/use-toast';
+import { GeneratingPdfModal } from './GeneratingPdfModal';
+
 
 interface ResultsDisplayProps {
   score: number;
@@ -25,6 +31,10 @@ export function ResultsDisplay({
   isLoadingAnalysis,
   topic,
 }: ResultsDisplayProps) {
+  const [isGeneratingRevisitPdf, setIsGeneratingRevisitPdf] = useState(false);
+  const [revisitPdfUrl, setRevisitPdfUrl] = useState<string | null>(null);
+  const { toast } = useToast();
+
   const getOptionClass = (qIndex: number, optionIndex: number) => {
     const attempt = questionsAttempted[qIndex];
     if (optionIndex === attempt.correctAnswerIndex) {
@@ -37,6 +47,129 @@ export function ResultsDisplay({
   };
   
   const scoreColor = score >= 70 ? 'text-green-500' : score >= 40 ? 'text-yellow-500' : 'text-red-500';
+
+  const handleGenerateRevisitPdf = async () => {
+    setIsGeneratingRevisitPdf(true);
+    setRevisitPdfUrl(null);
+
+    const incorrectOrSkippedQuestions = questionsAttempted.filter(
+      (q) => q.studentAnswerIndex !== q.correctAnswerIndex
+    );
+
+    if (incorrectOrSkippedQuestions.length === 0) {
+      toast({
+        title: "All Correct!",
+        description: "No incorrect answers to include in the Revisit PDF. Great job!",
+      });
+      setIsGeneratingRevisitPdf(false);
+      return;
+    }
+
+    try {
+      const revisitInput: RevisitMaterialInput = {
+        topic: topic,
+        incorrectQuestions: incorrectOrSkippedQuestions.map(q => ({
+          question: q.question,
+          options: q.options,
+          correctAnswerIndex: q.correctAnswerIndex,
+          studentAnswerIndex: q.studentAnswerIndex,
+        }))
+      };
+      
+      const revisitData: RevisitMaterialOutput = await generateRevisitMaterial(revisitInput);
+
+      // Generate PDF
+      const doc = new jsPDF();
+      let yPos = 20; // Initial Y position
+      const pageHeight = doc.internal.pageSize.height;
+      const margin = 15;
+      const lineSpacing = 7;
+      const paragraphSpacing = 10;
+
+      doc.setFontSize(18);
+      doc.setFont(undefined, 'bold');
+      doc.text(revisitData.title, doc.internal.pageSize.width / 2, yPos, { align: 'center' });
+      yPos += paragraphSpacing * 1.5;
+
+      doc.setFontSize(12);
+      doc.setFont(undefined, 'normal');
+      const introLines = doc.splitTextToSize(revisitData.introduction, doc.internal.pageSize.width - margin * 2);
+      doc.text(introLines, margin, yPos);
+      yPos += introLines.length * lineSpacing + paragraphSpacing;
+
+      doc.setFont(undefined, 'bold');
+      doc.text("Detailed Review:", margin, yPos);
+      yPos += lineSpacing * 1.5;
+
+      for (const section of revisitData.sections) {
+        if (yPos > pageHeight - margin * 3) { // Check for page break
+          doc.addPage();
+          yPos = margin;
+        }
+
+        doc.setFontSize(12);
+        doc.setFont(undefined, 'bold');
+        const questionLines = doc.splitTextToSize(`Question: ${section.question}`, doc.internal.pageSize.width - margin * 2);
+        doc.text(questionLines, margin, yPos);
+        yPos += questionLines.length * lineSpacing;
+        
+        doc.setFont(undefined, 'normal');
+        doc.setFontSize(10);
+
+        const correctAnswerText = `Correct Answer: ${section.correctAnswer}`;
+        const studentAnswerText = `Your Answer: ${section.studentAnswer || "Skipped"}`;
+        
+        const caLines = doc.splitTextToSize(correctAnswerText, doc.internal.pageSize.width - margin * 2);
+        doc.text(caLines, margin, yPos);
+        yPos += caLines.length * (lineSpacing - 2);
+
+        if (section.studentAnswer !== section.correctAnswer) {
+             const saLines = doc.splitTextToSize(studentAnswerText, doc.internal.pageSize.width - margin * 2);
+             doc.text(saLines, margin, yPos);
+             yPos += saLines.length * (lineSpacing - 2);
+        }
+        yPos += (lineSpacing -2);
+
+
+        doc.setFontSize(11);
+        doc.setFont(undefined, 'italic');
+        doc.text("Explanation:", margin, yPos);
+        yPos += lineSpacing;
+
+        doc.setFont(undefined, 'normal');
+        const explanationLines = doc.splitTextToSize(section.detailedExplanation, doc.internal.pageSize.width - margin * 2 - 5 /* indent a bit */);
+        doc.text(explanationLines, margin + 5, yPos);
+        yPos += explanationLines.length * (lineSpacing - 1) + paragraphSpacing;
+
+        if (section !== revisitData.sections[revisitData.sections.length - 1]) {
+           if (yPos > pageHeight - margin * 2) { doc.addPage(); yPos = margin; }
+           doc.setDrawColor(200, 200, 200); // light grey
+           doc.line(margin, yPos - (paragraphSpacing / 2), doc.internal.pageSize.width - margin, yPos - (paragraphSpacing / 2));
+        }
+
+      }
+
+      const pdfBlob = doc.output('blob');
+      const url = URL.createObjectURL(pdfBlob);
+      setRevisitPdfUrl(url);
+
+      toast({
+        title: "Revisit PDF Generated!",
+        description: "Your personalized study guide is ready for download.",
+      });
+
+    } catch (error) {
+      console.error("Error generating Revisit PDF:", error);
+      toast({
+        title: "PDF Generation Failed",
+        description: (error as Error).message || "Could not generate the Revisit PDF. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsGeneratingRevisitPdf(false);
+    }
+  };
+
 
   return (
     <div className="space-y-8">
@@ -55,7 +188,7 @@ export function ResultsDisplay({
             <Progress value={score} className="w-full max-w-md mx-auto h-4 mt-2" />
           </div>
 
-          {isLoadingAnalysis && !analysis && ( // Show loading only if analysis is not yet available
+          {isLoadingAnalysis && !analysis && (
             <div className="text-center py-6">
               <Lightbulb className="mx-auto h-8 w-8 animate-pulse text-primary mb-2" />
               <p className="text-muted-foreground">AI is analyzing your performance...</p>
@@ -83,6 +216,37 @@ export function ResultsDisplay({
               </CardContent>
             </Card>
           )}
+          
+          <div className="mt-8 pt-6 border-t">
+             <h3 className="text-2xl font-semibold mb-4 text-center">Study & Review</h3>
+             <div className="flex flex-col sm:flex-row justify-center items-center gap-4">
+                {!revisitPdfUrl ? (
+                  <Button 
+                    onClick={handleGenerateRevisitPdf} 
+                    disabled={isGeneratingRevisitPdf || questionsAttempted.filter(q => q.studentAnswerIndex !== q.correctAnswerIndex).length === 0}
+                    size="lg"
+                  >
+                    {isGeneratingRevisitPdf ? (
+                      <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                    ) : (
+                      <FileText className="mr-2 h-5 w-5" />
+                    )}
+                    Generate Revisit PDF
+                  </Button>
+                ) : (
+                  <a href={revisitPdfUrl} download={`${topic.replace(/\s+/g, '_')}_Revisit_Guide.pdf`}>
+                    <Button size="lg" variant="default">
+                      <Download className="mr-2 h-5 w-5" />
+                      Download Revisit PDF
+                    </Button>
+                  </a>
+                )}
+                {questionsAttempted.filter(q => q.studentAnswerIndex !== q.correctAnswerIndex).length === 0 && !isGeneratingRevisitPdf && (
+                  <p className="text-sm text-green-600">All questions answered correctly! No revisit PDF needed.</p>
+                )}
+             </div>
+          </div>
+
 
           <div>
             <h3 className="text-2xl font-semibold mb-4 mt-8 text-center">Detailed Question Review</h3>
@@ -153,6 +317,7 @@ export function ResultsDisplay({
           </Link>
         </CardFooter>
       </Card>
+      <GeneratingPdfModal isOpen={isGeneratingRevisitPdf} />
     </div>
   );
 }
