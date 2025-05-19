@@ -138,19 +138,23 @@ export function QuizClient() {
       cameraStreamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        videoRef.current.oncanplay = () => {
+        videoRef.current.onloadedmetadata = () => { // Use onloadedmetadata
             if (videoRef.current) {
                 videoRef.current.play().catch(err => {
-                    console.error('Error playing video via oncanplay:', err);
-                    // toast({ // This toast can be noisy if there are transient play issues
-                    //     variant: 'destructive',
-                    //     title: 'Camera Preview Error',
-                    //     description: 'Could not start camera preview. Please check camera.',
-                    // });
+                    console.error('Error playing video via onloadedmetadata:', err);
+                     toast({
+                         variant: 'destructive',
+                         title: 'Camera Preview Error',
+                         description: 'Could not start camera preview. Please check camera or browser settings.',
+                     });
                 });
             }
         };
-        videoRef.current.load(); 
+        videoRef.current.load(); // Ensure metadata loads
+        // Also attempt to play directly, in case onloadedmetadata is missed or already fired
+        videoRef.current.play().catch(err => {
+            console.warn('Direct play attempt failed (might be expected if metadata not loaded yet):', err);
+        });
       }
       setHasCameraPermission(true);
       setHasMicPermission(true);
@@ -165,6 +169,17 @@ export function QuizClient() {
     }
   };
 
+  // Effect to ensure video plays when in exam and permissions are granted
+  useEffect(() => {
+    if (quizState === 'in_progress' && hasCameraPermission && videoRef.current && videoRef.current.srcObject && videoRef.current.paused) {
+      console.log("Attempting to play video preview during in_progress state.");
+      videoRef.current.play().catch(err => {
+        console.error('Error playing video preview during in_progress state:', err);
+      });
+    }
+  }, [quizState, hasCameraPermission, videoRef]);
+
+
   const requestScreenSharePermission = async () => {
     try {
       const stream = await navigator.mediaDevices.getDisplayMedia({
@@ -173,6 +188,18 @@ export function QuizClient() {
       });
       
       const videoTrack = stream.getVideoTracks()[0];
+      if (!videoTrack) { // Check if track exists
+        stream.getTracks().forEach(track => track.stop());
+        screenStreamRef.current = null;
+        setHasScreenPermission(false);
+        toast({
+          variant: "destructive",
+          title: "Screen Share Failed",
+          description: "No video track found in screen share. Please try again.",
+          duration: 8000,
+        });
+        return false;
+      }
       const settings = videoTrack.getSettings();
 
       if (settings.displaySurface === "monitor") {
@@ -324,13 +351,20 @@ export function QuizClient() {
 
 
   const captureAndAnalyzeFrame = useCallback(async () => {
+    console.log("captureAndAnalyzeFrame: Called");
     if (!cameraStreamRef.current || !hasCameraPermission || isAnalyzingFrame || showFullScreenWarningModal) {
+      console.log("captureAndAnalyzeFrame: Aborting - Conditions not met", {hasCameraPermission, isAnalyzingFrame, showFullScreenWarningModal});
       return;
     }
 
     const videoTrack = cameraStreamRef.current.getVideoTracks()[0];
     if (!videoTrack || !videoRef.current || videoRef.current.readyState < videoRef.current.HAVE_METADATA || videoRef.current.videoWidth === 0) {
-      console.warn('Camera track not ready or video element not ready for capture.');
+      console.warn('captureAndAnalyzeFrame: Camera track not ready or video element not ready for capture.', {
+        videoTrackExists: !!videoTrack,
+        videoRefExists: !!videoRef.current,
+        videoRefReadyState: videoRef.current?.readyState,
+        videoWidth: videoRef.current?.videoWidth
+      });
       if (gracePeriodChecksCompleted >= PROCTORING_GRACE_PERIOD_CHECKS) {
         setHumanPresenceIssue(true);
         setHumanPresenceIssueReason("Camera feed issue: Not ready for capture.");
@@ -341,6 +375,7 @@ export function QuizClient() {
     }
     
     setIsAnalyzingFrame(true);
+    console.log("captureAndAnalyzeFrame: isAnalyzingFrame set to true");
     let aiAnalysisResult: AnalyzeCameraFeedOutput | null = null;
     let currentMicActive = false;
 
@@ -353,9 +388,10 @@ export function QuizClient() {
       if (ctx) {
         ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
         const dataUri = canvas.toDataURL('image/jpeg', 0.7);
+        console.log(`captureAndAnalyzeFrame: Data URI length: ${dataUri.length}`);
 
         if (dataUri.length < MIN_DATA_URI_LENGTH_FOR_AI) {
-            console.warn("Captured data URI is too short, likely blank/dark frame. Skipping AI analysis.");
+            console.warn("captureAndAnalyzeFrame: Captured data URI is too short, likely blank/dark frame. Skipping AI analysis.");
             if (gracePeriodChecksCompleted >= PROCTORING_GRACE_PERIOD_CHECKS) {
                 aiAnalysisResult = { 
                     isHumanDetected: false, 
@@ -366,11 +402,13 @@ export function QuizClient() {
                 };
             }
         } else {
+            console.log("captureAndAnalyzeFrame: Calling analyzeCameraFeed AI flow.");
             const analysisInput: AnalyzeCameraFeedInput = { imageDataUri: dataUri };
             aiAnalysisResult = await analyzeCameraFeed(analysisInput);
+            console.log("captureAndAnalyzeFrame: AI analysis result:", aiAnalysisResult);
         }
       } else {
-         console.warn("Could not get canvas context for frame capture.");
+         console.warn("captureAndAnalyzeFrame: Could not get canvas context for frame capture.");
          if (gracePeriodChecksCompleted >= PROCTORING_GRACE_PERIOD_CHECKS) {
             aiAnalysisResult = { 
                 isHumanDetected: false, 
@@ -382,16 +420,18 @@ export function QuizClient() {
         }
       }
       currentMicActive = checkMicrophoneActivity();
+      console.log("captureAndAnalyzeFrame: Mic activity:", currentMicActive);
 
       if (gracePeriodChecksCompleted < PROCTORING_GRACE_PERIOD_CHECKS) {
         setGracePeriodChecksCompleted(prev => prev + 1);
+        console.log(`captureAndAnalyzeFrame: Grace period checks completed: ${gracePeriodChecksCompleted + 1}`);
       }
 
       if (aiAnalysisResult) {
         const { isHumanDetected, isBookDetected, isPhoneDetected, isLookingAway, anomalyReason } = aiAnalysisResult;
-        // Informational toast for every AI analysis
+        
         let infoDescription = `Human: ${isHumanDetected ? 'Yes' : 'No'}`;
-        if (isHumanDetected) { // Only add these if a human is detected, to avoid noise
+        if (isHumanDetected) { 
           infoDescription += `, Book: ${isBookDetected ? 'Yes' : 'No'}`;
           infoDescription += `, Phone: ${isPhoneDetected ? 'Yes' : 'No'}`;
           infoDescription += `, Looking Away: ${isLookingAway ? 'Yes' : 'No'}`;
@@ -399,10 +439,11 @@ export function QuizClient() {
         if (anomalyReason) {
           infoDescription += `. Reason: ${anomalyReason}`;
         }
+        console.log("captureAndAnalyzeFrame: Showing informational toast:", infoDescription);
         toast({
           title: 'AI Camera Analysis',
           description: infoDescription,
-          duration: 3000, // Shorter duration for informational toasts
+          duration: 3000, 
         });
 
         if (gracePeriodChecksCompleted >= PROCTORING_GRACE_PERIOD_CHECKS) {
@@ -414,12 +455,14 @@ export function QuizClient() {
                 else if (!currentMicActive) reason = "Microphone appears inactive.";
                 setHumanPresenceIssueReason(reason);
                 setIsExamPausedByProctoring(true);
+                console.log("captureAndAnalyzeFrame: Human presence issue detected. Pausing exam. Reason:", reason);
             } else if (humanPresenceIssue) { 
                 setHumanPresenceIssue(false);
                 setHumanPresenceIssueReason(null);
                 if (!showFullScreenWarningModal) { 
                   setIsExamPausedByProctoring(false);
                 }
+                console.log("captureAndAnalyzeFrame: Human presence issue resolved. Resuming exam.");
             }
         }
 
@@ -430,6 +473,7 @@ export function QuizClient() {
             variant: 'destructive',
             duration: 7000,
           });
+          console.log("captureAndAnalyzeFrame: Policy violation detected (book, phone, looking away). Toast shown.");
         }
       }
 
@@ -447,6 +491,7 @@ export function QuizClient() {
       }
     } finally {
       setIsAnalyzingFrame(false);
+      console.log("captureAndAnalyzeFrame: isAnalyzingFrame set to false (finally block)");
     }
   }, [hasCameraPermission, toast, isAnalyzingFrame, checkMicrophoneActivity, gracePeriodChecksCompleted, humanPresenceIssue, showFullScreenWarningModal]);
 
@@ -644,7 +689,7 @@ export function QuizClient() {
               )}
             </div>
             
-            <div className={`w-full aspect-video rounded-md overflow-hidden bg-muted ${hasCameraPermission === true ? 'block' : 'hidden'}`}>
+             <div className={`w-full aspect-video rounded-md overflow-hidden bg-muted ${hasCameraPermission === true ? 'block' : 'hidden'}`}>
               {videoElement}
             </div>
             { hasCameraPermission === false && (
@@ -654,6 +699,7 @@ export function QuizClient() {
                     <AlertDescription>Grant camera access to see the preview.</AlertDescription>
                 </Alert>
             )}
+
 
             <Button 
               onClick={startExamFlow} 
@@ -696,7 +742,7 @@ export function QuizClient() {
                         <p className="text-sm font-medium text-center mb-1">
                           {hasCameraPermission ? "Camera Preview:" : "Camera permission needed for preview."}
                         </p>
-                        <div className={`w-full max-w-xs mx-auto aspect-video rounded overflow-hidden bg-muted ${hasCameraPermission === true ? 'block' : 'hidden'}`}>
+                         <div className={`w-full max-w-xs mx-auto aspect-video rounded overflow-hidden bg-muted ${hasCameraPermission === true ? 'block' : 'hidden'}`}>
                             {videoElement}
                           </div>
                          <p className="text-xs text-center mt-2">
@@ -746,7 +792,7 @@ export function QuizClient() {
               {isAnalyzingFrame && <Loader2 className="h-4 w-4 animate-spin text-primary" title="AI Analyzing..." />}
           </div>
           
-          <div className={`fixed bottom-4 right-4 w-40 h-30 md:w-48 md:h-36 z-[60] border-2 border-primary rounded-lg overflow-hidden shadow-xl bg-black ${hasCameraPermission ? 'block' : 'hidden'}`}>
+           <div className={`fixed bottom-4 right-4 w-40 h-32 md:w-48 md:h-[9rem] z-[60] border-2 border-primary rounded-lg overflow-hidden shadow-xl bg-black ${hasCameraPermission ? 'block' : 'hidden'}`}>
             {videoElement}
           </div>
           {!hasCameraPermission && quizState === 'in_progress' && (
@@ -837,3 +883,4 @@ export function QuizClient() {
   );
 }
 
+    
