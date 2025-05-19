@@ -1,3 +1,4 @@
+
 import type { Metadata } from 'next';
 import { Inter } from 'next/font/google'; // Using Inter as a common, clean sans-serif font
 import './globals.css';
@@ -7,7 +8,7 @@ import { Toaster } from "@/components/ui/toaster";
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter' });
 
 export const metadata: Metadata = {
-  title: 'MCQ AI Studio',
+  title: 'AI Quiz Maker',
   description: 'Generate MCQs and test your knowledge with AI!',
 };
 

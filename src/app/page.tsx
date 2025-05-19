@@ -3,7 +3,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useForm, type SubmitHandler } from 'react-hook-form'; // Removed useFieldArray
+import { useForm, type SubmitHandler } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { Button } from '@/components/ui/button';
@@ -17,7 +17,7 @@ import { generateMcqQuestions, type GenerateMcqQuestionsOutput } from '@/ai/flow
 import { generateOptionsForCustomQuestion, type GenerateOptionsForCustomQuestionOutput } from '@/ai/flows/generate-options-for-custom-question';
 import { generateSingleMcqFromUserQuery, type GenerateSingleMcqFromUserQueryOutput } from '@/ai/flows/generate-single-mcq-from-user-query';
 import type { GeneratedQuizData, McqQuestion } from '@/types/quiz';
-import { Loader2, Sparkles, Wand2, ListChecks, Clock, PencilLine } from 'lucide-react'; // Removed PlusCircle, Trash2
+import { Loader2, Sparkles, Wand2, ListChecks, Clock, PencilLine } from 'lucide-react';
 
 // Schemas for each mode
 const aiGeneratedQuizSchema = z.object({
@@ -51,7 +51,7 @@ const defaultValues: QuizSettingsFormValues = {
   numberOfQuestions: 5,
   quizDuration: 10,
   customQuizTitle: '',
-  customPromptsBlock: '', // Changed from customQuestions array
+  customPromptsBlock: '',
   customQuizDuration: 15,
 };
 
@@ -66,8 +66,6 @@ export default function HomePage() {
   });
 
   const quizMode = form.watch("quizMode");
-
-  // Removed useFieldArray: const { fields, append, remove } = useFieldArray(...)
 
   const onSubmit: SubmitHandler<QuizSettingsFormValues> = async (data) => {
     setIsLoading(true);
@@ -115,7 +113,6 @@ export default function HomePage() {
         const processedQuestions: McqQuestion[] = [];
         const ansPattern = /^(?<questionText>.+?)\s*\(ans\)(?<correctAnswerText>.+?)\(ans\)\s*$/i;
 
-        // Process customPromptsBlock
         const promptsArray = data.customPromptsBlock.trim().split('\n').filter(line => line.trim() !== '');
 
         for (const promptText of promptsArray) {
@@ -137,7 +134,6 @@ export default function HomePage() {
                 correctAnswerIndex: optionsResult.correctAnswerIndex,
               });
             } else {
-              // No valid (ans) pattern, or parts are missing. Treat as a prompt for full MCQ generation.
               const singleMcqResult: GenerateSingleMcqFromUserQueryOutput = await generateSingleMcqFromUserQuery({
                 userQuery: trimmedPrompt,
               });
@@ -374,8 +370,6 @@ The French Revolution
                     )}
                   />
                   
-                  {/* Removed individual prompt cards and Add Prompt button */}
-
                   <FormField
                     control={form.control}
                     name="customQuizDuration"
@@ -409,11 +403,9 @@ The French Revolution
           </Form>
         </CardContent>
         <CardFooter className="flex justify-center">
-          <p className="text-xs text-muted-foreground">Powered by Generative AI</p>
+          <p className="text-xs text-muted-foreground">Made with ❤️ from Saptarshi &amp; a Zedsu product</p>
         </CardFooter>
       </Card>
     </div>
   );
 }
-
-    
