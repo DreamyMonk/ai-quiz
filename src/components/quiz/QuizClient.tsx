@@ -26,8 +26,8 @@ declare global {
 const DEFAULT_QUIZ_DURATION_MINUTES = 15;
 const FULLSCREEN_RETURN_TIMEOUT_SECONDS = 30; // Time to return to fullscreen
 
-// IMPORTANT: Replace with your actual serviceId from Testwith
-const TESTWITH_SERVICE_ID = "YOUR_TESTWITH_SERVICE_ID_HERE"; 
+// IMPORTANT: Replace with your actual serviceId from Testwith if the RapidAPI key is not the correct one.
+const TESTWITH_SERVICE_ID = "a655795859msh4e6cb7455ba5af0p17b266jsnd4344da6e31d"; 
 
 export function QuizClient() {
   const [quizData, setQuizData] = useState<GeneratedQuizData | null>(null);
@@ -91,36 +91,61 @@ export function QuizClient() {
   // Initialize Testwith API after script is loaded
   useEffect(() => {
     if (testwithScriptLoaded && typeof window.Testwith !== 'undefined') {
-      if (TESTWITH_SERVICE_ID === "YOUR_TESTWITH_SERVICE_ID_HERE") {
-        toast({
-          title: "Testwith API Configuration Needed",
-          description: "Please replace YOUR_TESTWITH_SERVICE_ID_HERE in QuizClient.tsx with your actual service ID.",
-          variant: "destructive",
-          duration: 10000,
-        });
-        // Potentially block further progress or allow with a warning
-        // For now, we'll let it try to load but it will likely fail or not function correctly.
+      if (TESTWITH_SERVICE_ID === "YOUR_TESTWITH_SERVICE_ID_HERE" || TESTWITH_SERVICE_ID === "a655795859msh4e6cb7455ba5af0p17b266jsnd4344da6e31d") {
+        // Check if the key is one of the placeholders or the recently added RapidAPI key that might be incorrect for Testwith.
+        // This warning can be adjusted based on whether the RapidAPI key is confirmed to be correct or not for Testwith's serviceId.
+        // For now, we assume it *might* be a placeholder or potentially incorrect if it's the RapidAPI key and Testwith expects their own format.
+        const isPlaceholderOrPotentiallyIncorrectRapidAPIKey = 
+          TESTWITH_SERVICE_ID === "YOUR_TESTWITH_SERVICE_ID_HERE" ||
+          (TESTWITH_SERVICE_ID === "a655795859msh4e6cb7455ba5af0p17b266jsnd4344da6e31d" && 
+           !confirm("Is the RapidAPI key 'a655...e31d' the correct serviceId for Testwith? If not, Testwith integration may fail.")); // Simple confirm for now
+
+        if (isPlaceholderOrPotentiallyIncorrectRapidAPIKey && TESTWITH_SERVICE_ID !== "a655795859msh4e6cb7455ba5af0p17b266jsnd4344da6e31d") {
+           toast({
+            title: "Testwith API Configuration Needed",
+            description: "Please replace the placeholder TESTWITH_SERVICE_ID in QuizClient.tsx with your actual service ID from Testwith.",
+            variant: "destructive",
+            duration: 10000,
+          });
+        } else if (isPlaceholderOrPotentiallyIncorrectRapidAPIKey && TESTWITH_SERVICE_ID === "a655795859msh4e6cb7455ba5af0p17b266jsnd4344da6e31d") {
+            toast({
+            title: "Verify Testwith Service ID",
+            description: "The current TESTWITH_SERVICE_ID is set to a RapidAPI key. Please ensure this is the correct value expected by Testwith. If not, Testwith API may not function.",
+            variant: "warning",
+            duration: 15000,
+          });
+        }
       }
       
       setIsLoadingTestwith(true);
       try {
+        // Check if window.Testwith is actually a constructor
+        if (typeof window.Testwith !== 'function') {
+          throw new Error('Testwith API object (Testwith) is not a constructor. Script might not have loaded Testwith class correctly.');
+        }
         const tw = new window.Testwith(TESTWITH_SERVICE_ID);
         testwithInstanceRef.current = tw;
+
+        // Check if loadTestwith method exists
+        if (typeof tw.loadTestwith !== 'function') {
+           throw new Error('Testwith instance does not have a loadTestwith method.');
+        }
+
         tw.loadTestwith().then(() => {
           setTestwithApiReady(true);
           setIsLoadingTestwith(false);
           toast({ title: 'Testwith AI Proctoring Ready', description: 'AI supervision service initialized.', variant: 'default' });
         }).catch((err: any) => {
           console.error('Error Occurred While Loading Testwith Resources:', err);
-          toast({ title: 'Testwith API Error', description: 'Could not load AI proctoring resources. Please try again or contact support.', variant: 'destructive' });
+          toast({ title: 'Testwith API Error', description: `Could not load Testwith resources: ${err.message || 'Unknown error'}. Check console for details.`, variant: 'destructive' });
           setIsLoadingTestwith(false);
           setTestwithApiReady(false); // Explicitly set to false on error
         });
-      } catch (error) {
+      } catch (error: any) {
         console.error('Error initializing Testwith object:', error);
-        toast({ title: 'Testwith API Init Error', description: 'Failed to create Testwith object.', variant: 'destructive' });
+        toast({ title: 'Testwith API Init Error', description: `Failed to initialize Testwith: ${error.message || 'Unknown error'}.`, variant: 'destructive' });
         setIsLoadingTestwith(false);
-         setTestwithApiReady(false);
+        setTestwithApiReady(false);
       }
     }
   }, [testwithScriptLoaded, toast]);
@@ -429,9 +454,13 @@ export function QuizClient() {
         <Script
           src="https://www.testwith.co.kr/static/js/testwith_api.js"
           strategy="lazyOnload"
-          onLoad={() => setTestwithScriptLoaded(true)}
-          onError={() => {
-            toast({ title: 'Testwith API Error', description: 'Failed to load Testwith script.', variant: 'destructive' });
+          onLoad={() => {
+            console.log("Testwith script loaded from CDN.");
+            setTestwithScriptLoaded(true);
+          }}
+          onError={(e) => {
+            console.error("Error loading Testwith script:", e);
+            toast({ title: 'Testwith API Script Error', description: 'Failed to load Testwith script from CDN. Check network or script URL.', variant: 'destructive' });
             setIsLoadingTestwith(false);
             setTestwithApiReady(false);
           }}
@@ -464,11 +493,11 @@ export function QuizClient() {
                 <span>Loading Testwith AI Proctoring...</span>
               </div>
             )}
-            {!isLoadingTestwith && !testwithApiReady && testwithScriptLoaded && ( // Show error if loading failed
+            {!isLoadingTestwith && !testwithApiReady && testwithScriptLoaded && ( 
                 <Alert variant="destructive">
                     <AlertTriangle className="h-4 w-4" />
                     <AlertTitle>Testwith API Failed</AlertTitle>
-                    <AlertDescription>AI Proctoring service could not be initialized. Please check console for errors or try again.</AlertDescription>
+                    <AlertDescription>AI Proctoring service could not be initialized. Please check console for errors or try again. Ensure TESTWITH_SERVICE_ID is correct.</AlertDescription>
                 </Alert>
             )}
             {!isLoadingTestwith && testwithApiReady && (
@@ -478,19 +507,29 @@ export function QuizClient() {
                     <AlertDescription className="text-green-600">AI supervision service is active.</AlertDescription>
                 </Alert>
             )}
-
-            <Button onClick={startExamFlow} className="w-full" size="lg" disabled={hasCameraPermission !== true || hasMicPermission !== true || hasScreenPermission !== true || !testwithApiReady || isLoadingTestwith}>
-              Continue to Instructions
-            </Button>
-             {TESTWITH_SERVICE_ID === "YOUR_TESTWITH_SERVICE_ID_HERE" && (
+             {TESTWITH_SERVICE_ID === "YOUR_TESTWITH_SERVICE_ID_HERE" && !isLoadingTestwith && (
                 <Alert variant="destructive" className="mt-4">
                     <AlertTriangle className="h-4 w-4" />
-                    <AlertTitle>Action Required</AlertTitle>
+                    <AlertTitle>Action Required: Testwith Setup</AlertTitle>
                     <AlertDescription>
                         Update <code className="font-mono bg-red-100 px-1 rounded">TESTWITH_SERVICE_ID</code> in <code className="font-mono bg-red-100 px-1 rounded">QuizClient.tsx</code> with your actual ID from Testwith.
                     </AlertDescription>
                 </Alert>
             )}
+             {TESTWITH_SERVICE_ID === "a655795859msh4e6cb7455ba5af0p17b266jsnd4344da6e31d" && !isLoadingTestwith && !testwithApiReady && (
+                <Alert variant="warning" className="mt-4">
+                    <AlertTriangle className="h-4 w-4" />
+                    <AlertTitle>Verify Testwith Service ID</AlertTitle>
+                    <AlertDescription>
+                        The current <code className="font-mono bg-yellow-100 px-1 rounded">TESTWITH_SERVICE_ID</code> is set to a RapidAPI key. Please ensure this is the correct value expected by the Testwith API for its <code className="font-mono bg-yellow-100 px-1 rounded">serviceId</code> parameter. If not, the Testwith integration may fail to initialize or function correctly.
+                    </AlertDescription>
+                </Alert>
+            )}
+
+
+            <Button onClick={startExamFlow} className="w-full" size="lg" disabled={hasCameraPermission !== true || hasMicPermission !== true || hasScreenPermission !== true || !testwithApiReady || isLoadingTestwith}>
+              Continue to Instructions
+            </Button>
           </CardContent>
         </Card>
       </>
