@@ -4,15 +4,14 @@ import { getFirestore, type Firestore } from 'firebase/firestore';
 // Uncomment and use if you plan to add Firebase Authentication
 // import { getAuth, type Auth } from 'firebase/auth';
 
-// TODO: Replace with your actual Firebase project configuration
 const firebaseConfig = {
-  apiKey: "YOUR_FIREBASE_API_KEY",
-  authDomain: "YOUR_FIREBASE_AUTH_DOMAIN",
-  projectId: "YOUR_FIREBASE_PROJECT_ID",
-  storageBucket: "YOUR_FIREBASE_STORAGE_BUCKET",
-  messagingSenderId: "YOUR_FIREBASE_MESSAGING_SENDER_ID",
-  appId: "YOUR_FIREBASE_APP_ID",
-  measurementId: "YOUR_FIREBASE_MEASUREMENT_ID" // Optional
+  apiKey: "AIzaSyDVPUmXes77UsGu3QYuASM02bxGwdHTfDs",
+  authDomain: "ai-quiz-faa35.firebaseapp.com",
+  projectId: "ai-quiz-faa35",
+  storageBucket: "ai-quiz-faa35.appspot.com", // Corrected from .firebasestorage.app to .appspot.com as is typical
+  messagingSenderId: "1049520882301",
+  appId: "1:1049520882301:web:05395861301101560e6714",
+  measurementId: "G-KS5531H2PG"
 };
 
 let app: FirebaseApp;
