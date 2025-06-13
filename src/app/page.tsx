@@ -591,7 +591,7 @@ The French Revolution
           </Form>
         </CardContent>
         <CardFooter className="flex justify-center">
-          <p className="text-xs text-muted-foreground">Made with ❤️ from Saptarshi &amp; a Zedsu product</p>
+          <p className="text-xs text-muted-foreground">Made with ❤️ from Saptrishi &amp; a Zedsu product</p>
         </CardFooter>
       </Card>
     </div>
